@@ -48,6 +48,10 @@ module Tool_group : sig
 
   val equal : t -> t -> bool
   val to_dyn : t -> Dyn.t
+
+  (** The group's [name] field, or the name of its only tool when the field is
+      absent. Anonymous groups with several tools are rejected at load time. *)
+  val name : t -> string
 end
 
 module Lock_dir_selection : sig

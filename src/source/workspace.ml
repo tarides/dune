@@ -331,6 +331,25 @@ module Tool_group = struct
        in
        { loc; name; tools; lock_dir })
   ;;
+
+  let name { name; tools; _ } =
+    match name with
+    | Some (_, name) -> name
+    | None ->
+      (match tools with
+       | [ (_, { Dune_lang.Package_dependency.name; _ }) ] -> Package.Name.to_string name
+       | _ ->
+         Code_error.raise
+           "Tool_group.name: anonymous group with several tools"
+           [ "tools", Dyn.list Dune_lang.Package_dependency.to_dyn (List.map tools ~f:snd)
+           ])
+  ;;
+
+  let lock_dir_source_path name =
+    Path.Source.L.relative
+      Path.Source.root
+      [ "_build"; Dune_pkg.Pkg_workspace.tools_lock_dir_name; name ]
+  ;;
 end
 
 (* workspace files use the same version numbers as dune-project files for
@@ -994,16 +1013,42 @@ let source_path_of_lock_dir_path path =
        Path.Source.L.relative Path.Source.root lock_dir_segs
      | [ ".dev-tools.locks"; dev_tool ] ->
        Path.Source.L.relative Path.Source.root [ "_build"; ".dev-tools.locks"; dev_tool ]
+     | [ path; tool ] when String.equal path Dune_pkg.Pkg_workspace.tools_lock_dir_name ->
+       Tool_group.lock_dir_source_path tool
      | components ->
        Code_error.raise
          "Unsupported build path"
          [ "dir", Path.Build.to_dyn b; "components", Dyn.(list string) components ])
-  | External e -> Dune_pkg.Pkg_workspace.dev_tool_path_to_source_dir e
+  | External e ->
+    let is_tool_lock_dir =
+      match Path.Expert.try_localize_external (Path.external_ e) with
+      | In_build_dir b ->
+        (match Path.Build.explode b |> Filename.L.to_string with
+         | path :: _ when String.equal path Dune_pkg.Pkg_workspace.tools_lock_dir_name ->
+           true
+         | _ -> false)
+      | External _ | In_source_tree _ -> false
+    in
+    if is_tool_lock_dir
+    then Dune_pkg.Pkg_workspace.tool_path_to_source_dir e
+    else Dune_pkg.Pkg_workspace.dev_tool_path_to_source_dir e
 ;;
 
 let find_lock_dir t path =
   let path = source_path_of_lock_dir_path path in
-  List.find t.lock_dirs ~f:(fun lock_dir -> Path.Source.equal lock_dir.path path)
+  match
+    List.find_map t.tool_groups ~f:(fun (group : Tool_group.t) ->
+      Option.some_if
+        (Path.Source.equal (Tool_group.lock_dir_source_path (Tool_group.name group)) path)
+        group.lock_dir)
+  with
+  | Some (Lock_dir lock_dir) -> Some lock_dir
+  | Some (Inherit _) ->
+    (* An inheriting group is configured by its parent context's lock dir,
+         which the caller looks up with the parent's path. *)
+    None
+  | None ->
+    List.find t.lock_dirs ~f:(fun lock_dir -> Path.Source.equal lock_dir.path path)
 ;;
 
 let add_repo t repo = { t with repos = repo :: t.repos }
@@ -1208,11 +1253,11 @@ let check_lock_dirs_no_dupes lock_dirs =
 
 let check_no_duplicate_tool_group_names (tool_groups : Tool_group.t list) =
   match
-    List.filter_map tool_groups ~f:(fun (group : Tool_group.t) -> group.name)
-    |> String.Map.of_list_map ~f:(fun (loc, name) -> name, loc)
+    String.Map.of_list_map tool_groups ~f:(fun (group : Tool_group.t) ->
+      Tool_group.name group, group.loc)
   with
   | Ok _ -> ()
-  | Error (name, (loc1, _), (loc2, _)) ->
+  | Error (name, { Tool_group.loc = loc1; _ }, { loc = loc2; _ }) ->
     User_error.raise
       ~loc:loc2
       [ Pp.textf "Tool group %S is declared multiple times:" name
@@ -1262,6 +1307,17 @@ let check_no_duplicate_tools (tool_groups : Tool_group.t list) =
   Context_name.Map.of_list_multi inherited
   |> Context_name.Map.iteri ~f:(fun context tools ->
     check (Some context) (isolated @ List.concat tools))
+;;
+
+let check_anonymous_groups_have_one_tool (tool_groups : Tool_group.t list) =
+  List.iter tool_groups ~f:(fun (group : Tool_group.t) ->
+    match group.name, group.tools with
+    | Some _, _ | None, [ _ ] -> ()
+    | None, _ ->
+      User_error.raise
+        ~loc:group.loc
+        [ Pp.text "A tool group with more than one tool must have a name." ]
+        ~hints:[ Pp.text "Add a (name <string>) field to the group." ])
 ;;
 
 let check_tool_groups_contexts contexts (tool_groups : Tool_group.t list) =
@@ -1419,6 +1475,7 @@ let step1 ~(lang : Lang.Instance.t) clflags =
            else None
        in
        check_lock_dirs_no_dupes lock_dirs;
+       check_anonymous_groups_have_one_tool tool_groups;
        check_no_duplicate_tool_group_names tool_groups;
        check_no_duplicate_tools tool_groups;
        check_tool_groups_contexts contexts tool_groups;
