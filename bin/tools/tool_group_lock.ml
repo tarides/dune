@@ -54,18 +54,19 @@ let lock name ~portable_lock_dir =
     User_error.raise
       ~loc:group.loc
       [ Pp.text "Locking a tool group that inherits a context is not supported yet" ]
-  | Lock_dir _ ->
+  | Lock_dir lockdir ->
     let* solver_env_from_current_system =
       Pkg.Pkg_common.poll_solver_env_from_current_system () >>| Option.some
     in
     let local_package = local_package_of_group group in
+    let lock_dir_path = Path.external_ (Dune_rules.Lock_dir.tool_external_lock_dir group) in
     Pkg.Lock.solve
       workspace
       ~local_packages:(Package_name.Map.singleton local_package.name local_package)
       ~project_pins:Dune_pkg.Pin.DB.empty
       ~solver_env_from_current_system
       ~version_preference:None
-      ~lock_dirs:[ Path.external_ (Dune_rules.Lock_dir.tool_external_lock_dir group) ]
+      ~lock_dirs:[lock_dir_path, Some lockdir ]
       ~print_perf_stats:false
       ~portable_lock_dir
 ;;

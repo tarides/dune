@@ -25,6 +25,15 @@ module Version_preference : sig
   val choose : from_arg:t option -> from_context:t option -> t
 end
 
+(** The [_of_lockdir] functions read one field of a lock directory's
+    configuration, falling back to the default when there is none. The
+    [_of_workspace] and [repositories_of_lock_dir] forms look the
+    configuration up by the lock directory's path first. *)
+
+val unset_solver_vars_of_lockdir
+  :  Workspace.Lock_dir.t option
+  -> Dune_lang.Package_variable_name.Set.t option
+
 val unset_solver_vars_of_workspace
   :  Workspace.t
   -> lock_dir_path:Path.t
@@ -34,16 +43,24 @@ val repositories_of_workspace
   :  Workspace.t
   -> Dune_pkg.Pkg_workspace.Repository.t Dune_pkg.Pkg_workspace.Repository.Name.Map.t
 
+val repositories_of_lockdir
+  :  Workspace.t
+  -> Workspace.Lock_dir.t option
+  -> (Loc.t * Dune_pkg.Pkg_workspace.Repository.Name.t) list
+
 val repositories_of_lock_dir
   :  Workspace.t
   -> lock_dir_path:Path.t
   -> (Loc.t * Dune_pkg.Pkg_workspace.Repository.Name.t) list
+
+val constraints_of_lockdir : Workspace.Lock_dir.t option -> Dune_lang.Package_dependency.t list
 
 val constraints_of_workspace
   :  Workspace.t
   -> lock_dir_path:Path.t
   -> Dune_lang.Package_dependency.t list
 
+val depopts_of_lockdir : Workspace.Lock_dir.t option -> Package_name.t list
 val depopts_of_workspace : Workspace.t -> lock_dir_path:Path.t -> Package_name.t list
 val find_local_packages : Dune_pkg.Local_package.t Package_name.Map.t Memo.t
 
