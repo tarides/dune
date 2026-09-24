@@ -1257,9 +1257,21 @@ let check_no_duplicate_tool_group_names (tool_groups : Tool_group.t list) =
       Tool_group.name group, group.loc)
   with
   | Ok _ -> ()
-  | Error (name, { Tool_group.loc = loc1; _ }, { loc = loc2; _ }) ->
+  | Error
+      (name, { Tool_group.loc = loc1; name = name1; _ }, { loc = loc2; name = name2; _ })
+    ->
+    let hints =
+      match name1, name2 with
+      | Some _, Some _ -> []
+      | _ ->
+        [ Pp.text
+            "A group without a (name ...) field is named after its tool. Give one of \
+             these groups an explicit name."
+        ]
+    in
     User_error.raise
       ~loc:loc2
+      ~hints
       [ Pp.textf "Tool group %S is declared multiple times:" name
       ; Pp.enumerate ~f:Loc.pp_file_colon_line [ loc1; loc2 ]
       ]

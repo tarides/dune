@@ -182,6 +182,11 @@ val hash : t -> int
 val pkg_enabled : t -> bool
 
 val find_lock_dir : t -> Path.t -> Lock_dir.t option
+
+(** The source-tree spelling of a lock directory's path. Lock directories
+  written under [_build] get the fake spelling [_build/<dir>/<name>]. *)
+val source_path_of_lock_dir_path : Path.t -> Path.Source.t
+
 val add_repo : t -> Dune_pkg.Pkg_workspace.Repository.t -> t
 val default_repositories : Dune_pkg.Pkg_workspace.Repository.t list
 
