@@ -2286,6 +2286,7 @@ let solve_lock_dir
       repos
       ~local_packages
       ~pins:pinned_packages
+      ~provided_packages
       ~constraints
       ~selected_depopts
       ~portable_lock_dir
@@ -2306,7 +2307,16 @@ let solve_lock_dir
        in
        Fiber.return (Error (`Manifest_error message))
      | Ok pinned_packages ->
+       let pinned_packages =
+         Package_name.Map.union
+           pinned_packages
+           provided_packages
+           ~f:(fun _name _user_pin provided -> Some provided)
+       in
        let pinned_package_names = Package_name.Set.of_keys pinned_packages in
+       let provided_package_names =
+         Package_name.Set.add (Package_name.Set.of_keys provided_packages) Dune_dep.name
+       in
        let stats_updater = Solver_stats.Updater.init () in
        (* The platform envs themselves identify the platforms: every role and
           every per-platform selection is keyed by the platform's own
@@ -2364,13 +2374,13 @@ let solve_lock_dir
                 (Package_name.Map.mem packages name)
                 (full_solver_env, packages))
           in
-          let is_dune name = Package_name.equal Dune_dep.name name in
+          let is_provided name = Package_name.Set.mem provided_package_names name in
           (* Don't include local packages or dune in the lock dir. *)
           let opam_packages_to_lock =
             let is_local_package = Package_name.Map.mem local_packages in
             List.filter solution ~f:(fun package ->
               let name = OpamPackage.name package |> Package_name.of_opam_package_name in
-              (not (is_local_package name)) && not (is_dune name))
+              (not (is_local_package name)) && not (is_provided name))
           in
           let* candidates_cache = Fiber.Cache.to_table context.candidates_cache in
           let resolve_package name version =
@@ -2512,7 +2522,7 @@ let solve_lock_dir
                            depends
                            ~f:(fun { Lock_dir.Dependency.name = dep_name; loc } ->
                              match
-                               (not (is_dune dep_name))
+                               (not (is_provided dep_name))
                                && Package_name.Map.mem local_packages dep_name
                              with
                              | false -> Ok ()
@@ -2542,6 +2552,7 @@ let solve_lock_dir
             Lock_dir.create_latest_version
               pkgs_by_name
               ~local_packages:(Package_name.Map.values local_packages)
+              ~provided_packages:provided_package_names
               ~ocaml
               ~repos:(Some repos)
               ~expanded_solver_variable_bindings

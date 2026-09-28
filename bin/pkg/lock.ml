@@ -163,6 +163,7 @@ let solve_lock_dir
       (workspace : Workspace.t)
       ~local_packages
       ~project_pins
+      ~provided_packages
       ~print_perf_stats
       ~portable_lock_dir
       ~(lock_dir : Workspace.Lock_dir.t option)
@@ -189,8 +190,7 @@ let solve_lock_dir
     solver_env
       ~solver_env_from_context
       ~solver_env_from_current_system
-      ~unset_solver_vars_from_context:
-        (unset_solver_vars_of_lockdir lock_dir)
+      ~unset_solver_vars_from_context:(unset_solver_vars_of_lockdir lock_dir)
   in
   let solve_for_platforms =
     match portable_lock_dir with
@@ -234,6 +234,7 @@ let solve_lock_dir
            (Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.version_preference)))
       repos
       ~pins
+      ~provided_packages
       ~local_packages:
         (Package_name.Map.map local_packages ~f:Dune_pkg.Local_package.for_solver)
       ~constraints:(constraints_of_lockdir lock_dir)
@@ -297,28 +298,34 @@ let solve
      lockdir would fail then no side effect takes place. *)
   (let+ errors, solutions =
      let progress_indicator =
-       List.map lock_dirs ~f:(fun (lockdir_path, lock_dir) -> Progress_indicator.Per_lockdir.create lockdir_path, lock_dir)
-       (* ~f:Progress_indicator.Per_lockdir.create *)
+       List.map lock_dirs ~f:(fun (lockdir_path, lock_dir, provided_packages) ->
+         Progress_indicator.Per_lockdir.create lockdir_path, lock_dir, provided_packages)
      in
-     let overlay = Progress_indicator.add_overlay (List.map progress_indicator ~f:fst) in
+     let overlay =
+       Progress_indicator.add_overlay
+         (List.map progress_indicator ~f:(fun (i, _, _) -> i))
+     in
      let+ result =
        Fiber.finalize
          ~finally:(fun () ->
            Console.Status_line.remove_overlay overlay;
            Fiber.return ())
          (fun () ->
-            Fiber.parallel_map progress_indicator ~f:(fun ({ lockdir_path; state }, lock_dir) ->
-              solve_lock_dir
-                workspace
-                ~local_packages
-                ~project_pins
-                ~print_perf_stats
-                ~portable_lock_dir
-                ~lock_dir
-                version_preference
-                solver_env_from_current_system
-                lockdir_path
-                state))
+            Fiber.parallel_map
+              progress_indicator
+              ~f:(fun ({ lockdir_path; state }, lock_dir, provided_packages) ->
+                solve_lock_dir
+                  workspace
+                  ~local_packages
+                  ~project_pins
+                  ~provided_packages
+                  ~print_perf_stats
+                  ~portable_lock_dir
+                  ~lock_dir
+                  version_preference
+                  solver_env_from_current_system
+                  lockdir_path
+                  state))
      in
      List.partition_map result ~f:Result.to_either
    in
@@ -381,8 +388,9 @@ let lock ~version_preference ~lock_dirs_arg ~print_perf_stats ~portable_lock_dir
   let lock_dirs =
     Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dirs_arg workspace
     |> List.map ~f:(fun path ->
-        let path = Path.source path in
-        path, Workspace.find_lock_dir workspace path)
+      let path = Path.source path in
+      (* Provided packages is empty here, it's only populated for tools *)
+      path, Workspace.find_lock_dir workspace path, Package_name.Map.empty)
   in
   solve
     workspace

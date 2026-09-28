@@ -27,6 +27,12 @@ val solve_lock_dir
   -> Opam_repo.t list
   -> local_packages:Local_package.For_solver.t Package_name.Map.t
   -> pins:Resolved_package.t Package_name.Map.t
+  -> provided_packages:Resolved_package.t Package_name.Map.t
+       (** Pinned packages that live outside this lock directory, such as
+           packages already locked by a parent context. They fix versions
+           during the solve but are never written to the lock directory, and
+           locked packages may depend on them. Dune itself is always treated
+           this way. *)
   -> constraints:Dune_lang.Package_dependency.t list
   -> selected_depopts:Package_name.t list
   -> portable_lock_dir:bool

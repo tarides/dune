@@ -1139,7 +1139,7 @@ type missing_dependency =
    [Error (`Missing_dependencies missing_dependencies)] where
    [missing_dependencies] is a non-empty list with an element for each package
    dependency which doesn't have a corresponding entry in [packages]. *)
-let validate_packages packages =
+let validate_packages packages ~provided_packages =
   let missing_dependencies =
     Packages.to_pkg_list packages
     |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
@@ -1149,7 +1149,7 @@ let validate_packages packages =
              we supposed to filter these upfront? *)
           if
             Package_name.Map.mem packages depend.name
-            || Package_name.equal depend.name Dune_dep.name
+            || Package_name.Set.mem provided_packages depend.name
           then None
           else Some { dependant_package; dependency = depend.name; loc = depend.loc })))
   in
@@ -1161,6 +1161,7 @@ let validate_packages packages =
 let create_latest_version
       packages
       ~local_packages
+      ~provided_packages
       ~ocaml
       ~repos
       ~expanded_solver_variable_bindings
@@ -1171,7 +1172,7 @@ let create_latest_version
     Package_name.Map.map packages ~f:(fun (pkg : Pkg.t) ->
       Package_version.Map.singleton pkg.info.version pkg)
   in
-  (match validate_packages packages with
+  (match validate_packages packages ~provided_packages with
    | Ok () -> ()
    | Error (`Missing_dependencies missing_dependencies) ->
      List.map missing_dependencies ~f:(fun { dependant_package; dependency; loc = _ } ->
@@ -1639,7 +1640,11 @@ struct
   ;;
 
   let check_packages packages ~lock_dir_path =
-    match validate_packages packages with
+    match
+      validate_packages
+        packages
+        ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
+    with
     | Ok () -> Ok ()
     | Error (`Missing_dependencies missing_dependencies) ->
       List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->

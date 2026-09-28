@@ -93,7 +93,8 @@ let solve ~dev_tool ~local_packages =
        ~project_pins:compiler_pins
        ~solver_env_from_current_system
        ~version_preference:None
-       ~lock_dirs:[ lock_dir, Workspace.find_lock_dir workspace lock_dir ]
+       ~lock_dirs:
+         [ lock_dir, Workspace.find_lock_dir workspace lock_dir, Package_name.Map.empty ]
        ~print_perf_stats:false
        ~portable_lock_dir:false
 ;;
