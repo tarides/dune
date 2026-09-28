@@ -60,3 +60,35 @@ The group reuses bar from the context and only locks what it adds:
   baz.0.0.1.pkg
   foo.0.0.1.pkg
   lock.dune
+
+A shared package is fixed at the version the context locked. A tool that
+needs a different version cannot be solved, even though the repository has it:
+
+  $ mkpkg bar 0.0.2 <<EOF
+  > EOF
+  $ mkpkg qux <<EOF
+  > depends: [ "bar" {= "0.0.2"} ]
+  > EOF
+  $ cat >> dune-workspace <<EOF
+  > (tool_group
+  >  (tools qux)
+  >  (inherit (context default) (shared_packages bar)))
+  > EOF
+  $ dune tools lock qux
+  Error:
+  Unable to solve dependencies while generating lock directory:
+  $TESTCASE_ROOT/_build/.tools.locks/qux
+  
+  The dependency solver failed to find a solution for the requested platforms:
+  - arch = x86_64; os = linux
+  - arch = arm64; os = linux
+  - arch = x86_64; os = macos
+  - arch = arm64; os = macos
+  ...with this error:
+  Couldn't solve the package dependency formula.
+  Selected candidates: qux.0.0.1 qux_tool_group.dev
+  - bar -> (problem)
+      qux 0.0.1 requires = 0.0.2
+      Rejected candidates:
+        bar.0.0.1: Incompatible with restriction: = 0.0.2
+  [1]
