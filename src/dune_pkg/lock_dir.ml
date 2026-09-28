@@ -568,7 +568,7 @@ let in_source_tree path =
             ; "source_components", Dyn.(list string) source_components
             ; "build_components", Dyn.(list string) build_components
             ]))
-  | External e -> Workspace.dev_tool_path_to_source_dir e
+  | External e -> Workspace.external_lock_dir_to_source_dir e
 ;;
 
 let package_basename package_name maybe_package_version =
@@ -1415,8 +1415,8 @@ module Write_disk = struct
           match path with
           | In_source_tree _ | In_build_dir _ -> path
           | External e ->
-            (* it might be a dev-tool path, try to convert *)
-            Workspace.dev_tool_path_to_source_dir e |> Path.source
+            (* it might be a dev tool or tool group lock dir, try to convert *)
+            Workspace.external_lock_dir_to_source_dir e |> Path.source
         in
         Path.rm_rf path
     | Error e -> raise_user_error_on_check_existance path e

@@ -116,3 +116,16 @@ let tool_path_to_source_dir path =
          "Unexpected external path"
          [ "dir", Path.External.to_dyn path; "components", Dyn.(list string) components ])
 ;;
+
+let external_lock_dir_to_source_dir (path : Path.External.t) =
+  match Path.Expert.try_localize_external (Path.external_ path) with
+  | External _ | In_source_tree _ ->
+    Code_error.raise
+      "External path is not pointing to lock dir location"
+      [ "external", Path.External.to_dyn path ]
+  | In_build_dir b ->
+    (match Path.Build.explode b |> Filename.L.to_string with
+     | prefix :: _ when String.equal prefix tools_lock_dir_name ->
+       tool_path_to_source_dir path
+     | _ -> dev_tool_path_to_source_dir path)
+;;

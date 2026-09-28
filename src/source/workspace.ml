@@ -1019,19 +1019,7 @@ let source_path_of_lock_dir_path path =
        Code_error.raise
          "Unsupported build path"
          [ "dir", Path.Build.to_dyn b; "components", Dyn.(list string) components ])
-  | External e ->
-    let is_tool_lock_dir =
-      match Path.Expert.try_localize_external (Path.external_ e) with
-      | In_build_dir b ->
-        (match Path.Build.explode b |> Filename.L.to_string with
-         | path :: _ when String.equal path Dune_pkg.Pkg_workspace.tools_lock_dir_name ->
-           true
-         | _ -> false)
-      | External _ | In_source_tree _ -> false
-    in
-    if is_tool_lock_dir
-    then Dune_pkg.Pkg_workspace.tool_path_to_source_dir e
-    else Dune_pkg.Pkg_workspace.dev_tool_path_to_source_dir e
+  | External e -> Dune_pkg.Pkg_workspace.external_lock_dir_to_source_dir e
 ;;
 
 let find_lock_dir t path =

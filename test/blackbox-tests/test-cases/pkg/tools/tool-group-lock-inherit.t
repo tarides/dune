@@ -31,9 +31,16 @@ The project depends on bar, so the default context's lock dir provides it:
   >  (inherit (context default)))
   > EOF
 
-Locking the group before the context it inherits from fails:
+Locking the group before the context has a lock dir solves the context on
+demand in the build directory, the same as building would, and locks the group
+against that solution:
 
   $ dune tools lock foo
+  Solution for _build/.tools.locks/foo
+  
+  Dependencies common to all supported platforms:
+  - baz.0.0.1
+  - foo.0.0.1
 
   $ dune pkg lock
   Solution for dune.lock

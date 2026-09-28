@@ -44,28 +44,6 @@ Locking again replaces the previous lock dir:
   Dependencies common to all supported platforms:
   - bar.0.0.1
   - foo.0.0.1
-  Internal error! Please report to https://github.com/ocaml/dune/issues,
-  providing the file _build/trace.csexp, if possible. This includes build
-  commands, message logs, and file paths.
-  Description:
-    ("Unexpected external path",
-     { dir =
-         External
-           "$TESTCASE_ROOT/_build/.tools.locks/.foo"
-     ; components = [ ".tools.locks"; ".foo" ]
-     })
-  Raised at Stdune__Exn.protectx in file "otherlibs/stdune/src/exn.ml", line
-    16, characters 4-11
-  Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
-  Called from Fiber__Scheduler.exec in file "src/fiber/src/scheduler.ml", line
-    101, characters 11-22
-  
-  I must not crash.  Uncertainty is the mind-killer. Exceptions are the
-  little-death that brings total obliteration.  I will fully express my cases. 
-  Execution will pass over me and through me.  And when it has gone past, I
-  will unwind the stack along its path.  Where the cases are handled there will
-  be nothing.  Only I will remain.
-  [1]
 
 Only declared groups can be locked:
 
