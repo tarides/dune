@@ -30,6 +30,11 @@ The project depends on bar, so the default context's lock dir provides it:
   >  (tools foo)
   >  (inherit (context default)))
   > EOF
+
+Locking the group before the context it inherits from fails:
+
+  $ dune tools lock foo
+
   $ dune pkg lock
   Solution for dune.lock
   

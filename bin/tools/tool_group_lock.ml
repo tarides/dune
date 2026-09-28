@@ -92,25 +92,9 @@ let lock name ~portable_lock_dir =
        let root = local_package_of_group group in
        match group.lock_dir with
        | Inherit { context = _, ctx; shared_packages = _ } ->
-         let* parent = Dune_rules.Lock_dir.get ctx
+         let* parent = Dune_rules.Lock_dir.get_exn ctx
          and* platform = Dune_rules.Lock_dir.Sys_vars.solver_env
          and* parent_path = Dune_rules.Lock_dir.get_path ctx in
-         let parent =
-           match parent with
-           | Ok parent -> parent
-           | Error _ ->
-             User_error.raise
-               ~loc:group.loc
-               [ Pp.textf
-                   "Context %S has no lock directory to inherit from."
-                   (Context_name.to_string ctx)
-               ]
-               ~hints:
-                 [ Pp.concat
-                     ~sep:Pp.space
-                     [ Pp.text "Run"; User_message.command "dune pkg lock" ]
-                 ]
-         in
          let parent_path =
            match parent_path with
            | Some path -> path
