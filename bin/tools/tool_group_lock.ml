@@ -41,34 +41,111 @@ let local_package_of_group (tool_group : Workspace.Tool_group.t) =
   }
 ;;
 
+(* Helper for a package group that reused shared pkg from its parent context *)
+let local_package_of_shared_pkg ~platform (pkg : Dune_pkg.Lock_dir.Pkg.t) =
+  let dependencies =
+    Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform pkg.depends ~platform
+    |> Option.value ~default:[]
+    |> List.map ~f:(fun { Dune_pkg.Lock_dir.Dependency.name; loc = _ } ->
+      { Dune_lang.Package_dependency.name; constraint_ = None })
+    |> Dune_pkg.Dependency_formula.of_dependencies
+  in
+  { Dune_pkg.Local_package.name = pkg.info.name
+  ; version = pkg.info.version
+  ; dependencies
+  ; conflicts = []
+  ; conflict_class = []
+  ; depopts = []
+  ; pins = Package_name.Map.empty
+  ; loc = Loc.none
+  ; command_source = Dune_pkg.Local_package.Opam_file { build = []; install = [] }
+  }
+;;
+
+let resolved_package_of_shared_pkg ~platform (pkg : Dune_pkg.Lock_dir.Pkg.t) =
+  let local_package = local_package_of_shared_pkg ~platform pkg in
+  let opam_file =
+    Dune_pkg.Local_package.for_solver local_package
+    |> Dune_pkg.Local_package.For_solver.to_opam_file
+  in
+  let opam_package =
+    OpamPackage.create
+      (Dune_pkg.Package_name.to_opam_package_name pkg.info.name)
+      (Dune_pkg.Package_version.to_opam_package_version pkg.info.version)
+  in
+  Dune_pkg.Resolved_package.local_package
+    ~command_source:local_package.command_source
+    (Loc.none, opam_file)
+    opam_package
+;;
+
 let lock name ~portable_lock_dir =
   let open Fiber.O in
-  let* workspace, group =
+  let* workspace, lock_dir_path, lockdir, local_packages, provided_packages =
     Memo.run
       (let open Memo.O in
-       let+ workspace = Workspace.workspace () in
-       workspace, find_group workspace name)
+       let* workspace = Workspace.workspace () in
+       let group = find_group workspace name in
+       let lock_dir_path =
+         Path.external_ (Dune_rules.Lock_dir.tool_external_lock_dir group)
+       in
+       let root = local_package_of_group group in
+       match group.lock_dir with
+       | Inherit { context = _, ctx; shared_packages = _ } ->
+         let* parent = Dune_rules.Lock_dir.get ctx
+         and* platform = Dune_rules.Lock_dir.Sys_vars.solver_env
+         and* parent_path = Dune_rules.Lock_dir.get_path ctx in
+         let parent =
+           match parent with
+           | Ok parent -> parent
+           | Error _ ->
+             User_error.raise
+               ~loc:group.loc
+               [ Pp.textf
+                   "Context %S has no lock directory to inherit from."
+                   (Context_name.to_string ctx)
+               ]
+               ~hints:
+                 [ Pp.concat
+                     ~sep:Pp.space
+                     [ Pp.text "Run"; User_message.command "dune pkg lock" ]
+                 ]
+         in
+         let parent_path =
+           match parent_path with
+           | Some path -> path
+           | None ->
+             Code_error.raise
+               "inherited context has no lock dir path"
+               [ "context", Context_name.to_dyn ctx ]
+         in
+         let shared = Dune_pkg.Lock_dir.packages_on_platform parent ~platform in
+         let local_packages = Package_name.Map.singleton root.name root in
+         let provided_package =
+           Package_name.Map.map shared ~f:(resolved_package_of_shared_pkg ~platform)
+         in
+         let lock_dir = Workspace.find_lock_dir workspace parent_path in
+         Memo.return (workspace, lock_dir_path, lock_dir, local_packages, provided_package)
+       | Lock_dir lockdir ->
+         Memo.return
+           ( workspace
+           , lock_dir_path
+           , Some lockdir
+           , Package_name.Map.singleton root.name root
+           , Package_name.Map.empty ))
   in
-  match group.lock_dir with
-  | Inherit _ ->
-    User_error.raise
-      ~loc:group.loc
-      [ Pp.text "Locking a tool group that inherits a context is not supported yet" ]
-  | Lock_dir lockdir ->
-    let* solver_env_from_current_system =
-      Pkg.Pkg_common.poll_solver_env_from_current_system () >>| Option.some
-    in
-    let local_package = local_package_of_group group in
-    let lock_dir_path = Path.external_ (Dune_rules.Lock_dir.tool_external_lock_dir group) in
-    Pkg.Lock.solve
-      workspace
-      ~local_packages:(Package_name.Map.singleton local_package.name local_package)
-      ~project_pins:Dune_pkg.Pin.DB.empty
-      ~solver_env_from_current_system
-      ~version_preference:None
-      ~lock_dirs:[lock_dir_path, Some lockdir ]
-      ~print_perf_stats:false
-      ~portable_lock_dir
+  let* solver_env_from_current_system =
+    Pkg.Pkg_common.poll_solver_env_from_current_system () >>| Option.some
+  in
+  Pkg.Lock.solve
+    workspace
+    ~local_packages
+    ~project_pins:Dune_pkg.Pin.DB.empty
+    ~solver_env_from_current_system
+    ~version_preference:None
+    ~lock_dirs:[ lock_dir_path, lockdir, provided_packages ]
+    ~print_perf_stats:false
+    ~portable_lock_dir
 ;;
 
 let term =

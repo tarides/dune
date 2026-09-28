@@ -185,17 +185,6 @@ let dev_tool_lock_dir dev_tool =
   Path.build lock_dir
 ;;
 
-(* let tools_lock_dir (tool : Workspace.Tool_group.t) =
-  let ctx_name =
-    Context_name.to_string (match tool.inherit_ with
-    | Some { context = _, ctx; _ }  -> ctx 
-    | None -> Context_name.default) 
-  in
-  let lock_dir =
-    Path.Build.L.relative Private_context.t.build_dir [ctx_name; ".tools-locks"]
-  in
-  let lock_dir = Path.Build.append_local lock_dir *)
-
 let lock_dir_of_source p =
   let local = Path.Source.to_local p in
   Path.Build.append_local path_prefix local |> Path.build

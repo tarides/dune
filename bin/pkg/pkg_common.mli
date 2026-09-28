@@ -53,7 +53,9 @@ val repositories_of_lock_dir
   -> lock_dir_path:Path.t
   -> (Loc.t * Dune_pkg.Pkg_workspace.Repository.Name.t) list
 
-val constraints_of_lockdir : Workspace.Lock_dir.t option -> Dune_lang.Package_dependency.t list
+val constraints_of_lockdir
+  :  Workspace.Lock_dir.t option
+  -> Dune_lang.Package_dependency.t list
 
 val constraints_of_workspace
   :  Workspace.t
