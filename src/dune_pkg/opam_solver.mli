@@ -33,6 +33,11 @@ val solve_lock_dir
            during the solve but are never written to the lock directory, and
            locked packages may depend on them. Dune itself is always treated
            this way. *)
+  -> parent_packages:Lock_dir.Pkg.t Package_name.Map.t
+       (** Packages locked by a parent context on the current platform. Their
+           versions are tried first during a solve; packages that end up
+           identical to parent's packages are not written to the lock
+           directory. Empty when there's no parent. *)
   -> constraints:Dune_lang.Package_dependency.t list
   -> selected_depopts:Package_name.t list
   -> portable_lock_dir:bool

@@ -81,7 +81,13 @@ let resolved_package_of_shared_pkg ~platform (pkg : Dune_pkg.Lock_dir.Pkg.t) =
 
 let lock name ~portable_lock_dir =
   let open Fiber.O in
-  let* workspace, lock_dir_path, lockdir, local_packages, provided_packages =
+  let* ( workspace
+       , lock_dir_path
+       , lockdir
+       , local_packages
+       , provided_packages
+       , parent_packages )
+    =
     Memo.run
       (let open Memo.O in
        let* workspace = Workspace.workspace () in
@@ -91,7 +97,7 @@ let lock name ~portable_lock_dir =
        in
        let root = local_package_of_group group in
        match group.lock_dir with
-       | Inherit { context = _, ctx; shared_packages = _ } ->
+       | Inherit { context = _, ctx; shared_packages } ->
          let* parent = Dune_rules.Lock_dir.get_exn ctx
          and* platform = Dune_rules.Lock_dir.Sys_vars.solver_env
          and* parent_path = Dune_rules.Lock_dir.get_path ctx in
@@ -104,18 +110,51 @@ let lock name ~portable_lock_dir =
                [ "context", Context_name.to_dyn ctx ]
          in
          let shared = Dune_pkg.Lock_dir.packages_on_platform parent ~platform in
+         (* Compute the compiler package + packages listed in shared_pkg as
+         roots *)
+         let hard_roots =
+           let explicit =
+             Option.value shared_packages ~default:[]
+             |> List.map ~f:snd
+             |> Package_name.Set.of_list
+           in
+           match parent.ocaml with
+           | None -> explicit
+           | Some (_, ocaml) -> Package_name.Set.add explicit ocaml
+         in
+         let hard =
+           match
+             Dune_pkg.Lock_dir.transitive_dependency_closure parent ~platform hard_roots
+           with
+           | Ok hard -> hard
+           | Error (`Missing_packages packages) ->
+             User_error.raise
+               ~loc:group.loc
+               [ Pp.textf
+                   "The following shared packages are not in the lock directory of \
+                    context %S: %s"
+                   (Context_name.to_string ctx)
+                   (Package_name.Set.to_list packages
+                    |> List.map ~f:Package_name.to_string
+                    |> String.concat ~sep:", ")
+               ]
+         in
          let local_packages = Package_name.Map.singleton root.name root in
          let provided_package =
-           Package_name.Map.map shared ~f:(resolved_package_of_shared_pkg ~platform)
+           Package_name.Map.filteri shared ~f:(fun name _ ->
+             Package_name.Set.mem hard name)
+           |> Package_name.Map.map ~f:(resolved_package_of_shared_pkg ~platform)
          in
          let lock_dir = Workspace.find_lock_dir workspace parent_path in
-         Memo.return (workspace, lock_dir_path, lock_dir, local_packages, provided_package)
+         Memo.return
+           (workspace, lock_dir_path, lock_dir, local_packages, provided_package, shared)
        | Lock_dir lockdir ->
          Memo.return
            ( workspace
            , lock_dir_path
            , Some lockdir
            , Package_name.Map.singleton root.name root
+           , Package_name.Map.empty
            , Package_name.Map.empty ))
   in
   let* solver_env_from_current_system =
@@ -127,7 +166,13 @@ let lock name ~portable_lock_dir =
     ~project_pins:Dune_pkg.Pin.DB.empty
     ~solver_env_from_current_system
     ~version_preference:None
-    ~lock_dirs:[ lock_dir_path, lockdir, provided_packages ]
+    ~lock_dirs:
+      [ { Pkg.Lock.path = lock_dir_path
+        ; lock_dir = lockdir
+        ; provided = provided_packages
+        ; parent = parent_packages
+        }
+      ]
     ~print_perf_stats:false
     ~portable_lock_dir
 ;;

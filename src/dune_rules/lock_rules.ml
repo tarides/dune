@@ -165,6 +165,7 @@ module Spec = struct
         repos
         ~pins
         ~provided_packages:Package_name.Map.empty
+        ~parent_packages:Package_name.Map.empty
         ~local_packages
         ~constraints
         ~selected_depopts

@@ -94,7 +94,12 @@ let solve ~dev_tool ~local_packages =
        ~solver_env_from_current_system
        ~version_preference:None
        ~lock_dirs:
-         [ lock_dir, Workspace.find_lock_dir workspace lock_dir, Package_name.Map.empty ]
+         [ { Pkg.Lock.path = lock_dir
+           ; lock_dir = Workspace.find_lock_dir workspace lock_dir
+           ; provided = Package_name.Map.empty
+           ; parent = Package_name.Map.empty
+           }
+         ]
        ~print_perf_stats:false
        ~portable_lock_dir:false
 ;;
