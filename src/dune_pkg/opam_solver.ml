@@ -26,7 +26,9 @@ module Priority = struct
      fed to the solver. Any change to package selection should be reflected in
      this priority rather than implemented in an ad-hoc manner *)
   type t =
-    { (* We prefer packages with [avoid-version: false] *)
+    { (* The version locked by the parent context, tried first *)
+      preferred : bool
+    ; (* We prefer packages with [avoid-version: false] *)
       avoid : bool
     ; version : OpamPackage.Version.t
     }
@@ -39,21 +41,23 @@ module Priority = struct
       | Newest -> ord y x
   ;;
 
-  let compare pref t { avoid; version } =
-    Tuple.T2.compare
+  let compare pref t { preferred; avoid; version } =
+    Tuple.T3.compare
+      Bool.compare
       Bool.compare
       (compare_version pref)
-      (t.avoid, t.version)
-      (avoid, version)
+      (not t.preferred, t.avoid, t.version)
+      (not preferred, avoid, version)
   ;;
 
-  let make (package : OpamFile.OPAM.t) =
+  let make (package : OpamFile.OPAM.t) ~preferred =
     let avoid = List.mem package.flags Pkgflag_AvoidVersion ~equal:Poly.equal in
     let version = OpamFile.OPAM.package package |> OpamPackage.version in
-    { version; avoid }
+    let preferred = Option.equal OpamPackage.Version.equal preferred (Some version) in
+    { preferred; version; avoid }
   ;;
 
-  let allowed version = { avoid = false; version }
+  let allowed version = { avoid = false; version; preferred = false }
 end
 
 module Context = struct
@@ -95,6 +99,9 @@ module Context = struct
     { repos : Opam_repo.t list
     ; version_preference : Version_preference.t
     ; pinned_packages : Resolved_package.t Package_name.Map.t
+      (* Versions locked by the parent context for tools. Try this, otherwise
+    fallback to different versions.*)
+    ; preferred_versions : OpamPackage.Version.t Package_name.Map.t
     ; local_packages : local_package Package_name.Map.t Lazy.t
     ; local_constraints : (Package_name.t, local_package list) Table.t Lazy.t
     ; solver_env : Solver_env.t
@@ -113,6 +120,7 @@ module Context = struct
 
   let create
         ~pinned_packages
+        ~preferred_versions
         ~solver_env
         ~platforms
         ~repos
@@ -158,6 +166,7 @@ module Context = struct
     ; version_preference
     ; local_packages
     ; pinned_packages
+    ; preferred_versions
     ; solver_env =
         Solver_env.add_sentinel_values_for_unset_platform_vars solver_env
         (* The platform envs don't need sentinel values - they only contain
@@ -358,11 +367,14 @@ module Context = struct
       t.expanded_packages
       (Package_name.of_opam_package_name name)
       (OpamPackage.Version.Map.cardinal resolved);
+    let preferred =
+      Package_name.Map.find t.preferred_versions (Package_name.of_opam_package_name name)
+    in
     let unfiltered =
       OpamPackage.Version.Map.values resolved
       |> List.map ~f:(fun resolved_package ->
         let opam = Resolved_package.opam_file resolved_package in
-        { priority = Priority.make opam; opam; origin = Repository })
+        { priority = Priority.make opam ~preferred; opam; origin = Repository })
       |> List.sort ~compare:(fun x y ->
         Priority.compare t.version_preference x.priority y.priority)
     in
@@ -773,7 +785,7 @@ module Solver = struct
           match Context.rejection_for_platform context ~platform candidate with
           | Some _ -> None
           | None ->
-            let { Priority.version; avoid } = priority in
+            let { Priority.version; avoid; preferred = _ } = priority in
             let pkg = OpamPackage.create name version in
             (* Note: we ignore depopts here: see opam/doc/design/depopts-and-features *)
             let requires =
@@ -2279,6 +2291,35 @@ let base_solver_env_and_platforms solver_env ~solve_for_platforms ~portable_lock
   else solver_env, [ Solver_env.empty ]
 ;;
 
+(* Packages the solver chose identically to the parent. These packages don't
+need to be written in the lock and built. *)
+let shared_with_parent pkgs_by_name ~parent_packages ~provided ~platforms_of =
+  let dependency_names (pkg : Lock_dir.Pkg.t) ~platform =
+    Lock_dir.Conditional_choice.choose_for_platform pkg.depends ~platform
+    |> Option.value ~default:[]
+    |> Package_name.Set.of_list_map ~f:(fun (dep : Lock_dir.Dependency.t) -> dep.name)
+  in
+  let same_as_parent name (pkg : Lock_dir.Pkg.t) ~shared =
+    match Package_name.Map.find parent_packages name with
+    | None -> false
+    | Some (parent : Lock_dir.Pkg.t) ->
+      Package_version.equal pkg.info.version parent.info.version
+      && List.for_all (platforms_of name) ~f:(fun platform ->
+        let deps = dependency_names pkg ~platform in
+        Package_name.Set.equal deps (dependency_names parent ~platform)
+        && Package_name.Set.is_subset deps ~of_:(Package_name.Set.union shared provided))
+  in
+  let rec fix shared =
+    let shared' =
+      Package_name.Map.filteri pkgs_by_name ~f:(fun name pkg ->
+        Package_name.Set.mem shared name && same_as_parent name pkg ~shared)
+      |> Package_name.Set.of_keys
+    in
+    if Package_name.Set.equal shared shared' then shared else fix shared'
+  in
+  fix (Package_name.Set.of_keys pkgs_by_name)
+;;
+
 let solve_lock_dir
       solver_env
       ~platform_overlays
@@ -2286,6 +2327,8 @@ let solve_lock_dir
       repos
       ~local_packages
       ~pins:pinned_packages
+      ~provided_packages
+      ~parent_packages
       ~constraints
       ~selected_depopts
       ~portable_lock_dir
@@ -2306,7 +2349,16 @@ let solve_lock_dir
        in
        Fiber.return (Error (`Manifest_error message))
      | Ok pinned_packages ->
+       let pinned_packages =
+         Package_name.Map.union
+           pinned_packages
+           provided_packages
+           ~f:(fun _name _user_pin provided -> Some provided)
+       in
        let pinned_package_names = Package_name.Set.of_keys pinned_packages in
+       let provided_package_names =
+         Package_name.Set.add (Package_name.Set.of_keys provided_packages) Dune_dep.name
+       in
        let stats_updater = Solver_stats.Updater.init () in
        (* The platform envs themselves identify the platforms: every role and
           every per-platform selection is keyed by the platform's own
@@ -2337,8 +2389,13 @@ let solve_lock_dir
                 ; filtered_formulas_by_platform = Table.create (module Solver_env) 1
                 }))
          in
+         let preferred_versions =
+           Package_name.Map.map parent_packages ~f:(fun (pkg : Lock_dir.Pkg.t) ->
+             Package_version.to_opam_package_version pkg.info.version)
+         in
          Context.create
            ~pinned_packages
+           ~preferred_versions
            ~solver_env
            ~platforms
            ~repos
@@ -2364,13 +2421,13 @@ let solve_lock_dir
                 (Package_name.Map.mem packages name)
                 (full_solver_env, packages))
           in
-          let is_dune name = Package_name.equal Dune_dep.name name in
+          let is_provided name = Package_name.Set.mem provided_package_names name in
           (* Don't include local packages or dune in the lock dir. *)
           let opam_packages_to_lock =
             let is_local_package = Package_name.Map.mem local_packages in
             List.filter solution ~f:(fun package ->
               let name = OpamPackage.name package |> Package_name.of_opam_package_name in
-              (not (is_local_package name)) && not (is_dune name))
+              (not (is_local_package name)) && not (is_provided name))
           in
           let* candidates_cache = Fiber.Cache.to_table context.candidates_cache in
           let resolve_package name version =
@@ -2460,6 +2517,27 @@ let solve_lock_dir
                           | Some previous ->
                             Some (Lock_dir.Pkg.merge_conditionals previous package)))))
           in
+          let shared_names =
+            match pkgs_by_name with
+            | Error _ -> Package_name.Set.empty
+            | Ok pkgs_by_name ->
+              shared_with_parent
+                pkgs_by_name
+                ~parent_packages
+                ~provided:provided_package_names
+                ~platforms_of:(fun name -> List.map (solver_envs_for_package name) ~f:fst)
+          in
+          (* Filter out packages in shared_names that are identical to the parent context's. Only relevant when inheriting context. *)
+          let pkgs_by_name =
+            Result.map pkgs_by_name ~f:(fun pkgs_by_name ->
+              Package_name.Map.filteri pkgs_by_name ~f:(fun name _ ->
+                not (Package_name.Set.mem shared_names name)))
+          in
+          (* Packages reused from the parent count as provided from now on. *)
+          let provided_package_names =
+            Package_name.Set.union provided_package_names shared_names
+          in
+          let is_provided name = Package_name.Set.mem provided_package_names name in
           let ocaml =
             let open Result.O in
             let* pkgs_by_name = pkgs_by_name in
@@ -2512,7 +2590,7 @@ let solve_lock_dir
                            depends
                            ~f:(fun { Lock_dir.Dependency.name = dep_name; loc } ->
                              match
-                               (not (is_dune dep_name))
+                               (not (is_provided dep_name))
                                && Package_name.Map.mem local_packages dep_name
                              with
                              | false -> Ok ()
@@ -2542,6 +2620,7 @@ let solve_lock_dir
             Lock_dir.create_latest_version
               pkgs_by_name
               ~local_packages:(Package_name.Map.values local_packages)
+              ~provided_packages:provided_package_names
               ~ocaml
               ~repos:(Some repos)
               ~expanded_solver_variable_bindings

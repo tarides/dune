@@ -87,21 +87,32 @@ let repositories_of_workspace (workspace : Workspace.t) =
   |> Dune_pkg.Pkg_workspace.Repository.Name.Map.of_list_exn
 ;;
 
-let constraints_of_workspace (workspace : Workspace.t) ~lock_dir_path =
-  match Workspace.find_lock_dir workspace lock_dir_path with
+let constraints_of_lockdir (lockdir : Workspace.Lock_dir.t option) =
+  match lockdir with
+  | Some lockdir -> lockdir.constraints
   | None -> []
-  | Some lock_dir -> lock_dir.constraints
+;;
+
+let constraints_of_workspace (workspace : Workspace.t) ~lock_dir_path =
+  Workspace.find_lock_dir workspace lock_dir_path |> constraints_of_lockdir
+;;
+
+let depopts_of_lockdir (lockdir : Workspace.Lock_dir.t option) =
+  match lockdir with
+  | Some lockdir -> List.map ~f:snd lockdir.depopts
+  | None -> []
 ;;
 
 let depopts_of_workspace (workspace : Workspace.t) ~lock_dir_path =
-  match Workspace.find_lock_dir workspace lock_dir_path with
-  | None -> []
-  | Some lock_dir -> lock_dir.depopts |> List.map ~f:snd
+  Workspace.find_lock_dir workspace lock_dir_path |> depopts_of_lockdir
 ;;
 
-let repositories_of_lock_dir workspace ~lock_dir_path =
-  match Workspace.find_lock_dir workspace lock_dir_path with
-  | Some lock_dir -> lock_dir.repositories
+let repositories_of_lockdir
+      (workspace : Workspace.t)
+      (lockdir : Workspace.Lock_dir.t option)
+  =
+  match lockdir with
+  | Some lockdir -> lockdir.repositories
   | None ->
     List.map workspace.repos ~f:(fun repo ->
       let name = Dune_pkg.Pkg_workspace.Repository.name repo in
@@ -109,10 +120,18 @@ let repositories_of_lock_dir workspace ~lock_dir_path =
       loc, name)
 ;;
 
+let repositories_of_lock_dir workspace ~lock_dir_path =
+  Workspace.find_lock_dir workspace lock_dir_path |> repositories_of_lockdir workspace
+;;
+
+let unset_solver_vars_of_lockdir (lockdir : Workspace.Lock_dir.t option) =
+  match lockdir with
+  | None -> None
+  | Some lockdir -> lockdir.unset_solver_vars
+;;
+
 let unset_solver_vars_of_workspace workspace ~lock_dir_path =
-  let open Option.O in
-  let* lock_dir = Workspace.find_lock_dir workspace lock_dir_path in
-  lock_dir.unset_solver_vars
+  Workspace.find_lock_dir workspace lock_dir_path |> unset_solver_vars_of_lockdir
 ;;
 
 let find_local_packages =

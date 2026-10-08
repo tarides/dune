@@ -58,7 +58,7 @@ let user_lock_dir_path path =
   match (path : Path.t) with
   | In_source_tree _ -> path
   | In_build_dir _ -> path
-  | External e -> Dune_pkg.Pkg_workspace.dev_tool_path_to_source_dir e |> Path.source
+  | External _ -> Workspace.source_path_of_lock_dir_path path |> Path.source
 ;;
 
 let summary_message
@@ -158,19 +158,28 @@ let pp_solve_error (message, platforms) =
   |> Pp.vbox
 ;;
 
+type lock_dir_request =
+  { path : Path.t
+  ; lock_dir : Workspace.Lock_dir.t option
+  ; provided : Dune_pkg.Resolved_package.t Package_name.Map.t
+  ; parent : Dune_pkg.Lock_dir.Pkg.t Package_name.Map.t
+  }
+
 let solve_lock_dir
-      workspace
+      (workspace : Workspace.t)
       ~local_packages
       ~project_pins
+      ~provided_packages
+      ~parent_packages
       ~print_perf_stats
       ~portable_lock_dir
+      ~(lock_dir : Workspace.Lock_dir.t option)
       version_preference
       solver_env_from_current_system
       lock_dir_path
       progress_state
   =
   let open Fiber.O in
-  let lock_dir = Workspace.find_lock_dir workspace lock_dir_path in
   let project_pins, solve_for_platforms =
     match lock_dir with
     | None -> project_pins, Solver_env.popular_platform_envs
@@ -188,8 +197,7 @@ let solve_lock_dir
     solver_env
       ~solver_env_from_context
       ~solver_env_from_current_system
-      ~unset_solver_vars_from_context:
-        (unset_solver_vars_of_workspace workspace ~lock_dir_path)
+      ~unset_solver_vars_from_context:(unset_solver_vars_of_lockdir lock_dir)
   in
   let solve_for_platforms =
     match portable_lock_dir with
@@ -212,7 +220,7 @@ let solve_lock_dir
     := Some (Progress_indicator.Per_lockdir.State.Updating_repos repo_names);
     Dune_pkg.Opam_repo.resolve_repositories
       ~available_repos:repo_map
-      ~repositories:(repositories_of_lock_dir workspace ~lock_dir_path)
+      ~repositories:(repositories_of_lockdir workspace lock_dir)
   in
   let* pins = Pin.Project.resolve project_pins in
   let time_solve_start = Time.now () in
@@ -233,10 +241,12 @@ let solve_lock_dir
            (Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.version_preference)))
       repos
       ~pins
+      ~provided_packages
+      ~parent_packages
       ~local_packages:
         (Package_name.Map.map local_packages ~f:Dune_pkg.Local_package.for_solver)
-      ~constraints:(constraints_of_workspace workspace ~lock_dir_path)
-      ~selected_depopts:(depopts_of_workspace workspace ~lock_dir_path)
+      ~constraints:(constraints_of_lockdir lock_dir)
+      ~selected_depopts:(depopts_of_lockdir lock_dir)
       ~portable_lock_dir
   in
   match result with
@@ -296,26 +306,35 @@ let solve
      lockdir would fail then no side effect takes place. *)
   (let+ errors, solutions =
      let progress_indicator =
-       List.map lock_dirs ~f:Progress_indicator.Per_lockdir.create
+       List.map lock_dirs ~f:(fun { path; lock_dir; provided; parent } ->
+         Progress_indicator.Per_lockdir.create path, lock_dir, provided, parent)
      in
-     let overlay = Progress_indicator.add_overlay progress_indicator in
+     let overlay =
+       Progress_indicator.add_overlay
+         (List.map progress_indicator ~f:(fun (i, _, _, _) -> i))
+     in
      let+ result =
        Fiber.finalize
          ~finally:(fun () ->
            Console.Status_line.remove_overlay overlay;
            Fiber.return ())
          (fun () ->
-            Fiber.parallel_map progress_indicator ~f:(fun { lockdir_path; state } ->
-              solve_lock_dir
-                workspace
-                ~local_packages
-                ~project_pins
-                ~print_perf_stats
-                ~portable_lock_dir
-                version_preference
-                solver_env_from_current_system
-                lockdir_path
-                state))
+            Fiber.parallel_map
+              progress_indicator
+              ~f:(fun ({ lockdir_path; state }, lock_dir, provided, parent) ->
+                solve_lock_dir
+                  workspace
+                  ~local_packages
+                  ~project_pins
+                  ~provided_packages:provided
+                  ~parent_packages:parent
+                  ~print_perf_stats
+                  ~portable_lock_dir
+                  ~lock_dir
+                  version_preference
+                  solver_env_from_current_system
+                  lockdir_path
+                  state))
      in
      List.partition_map result ~f:Result.to_either
    in
@@ -377,7 +396,14 @@ let lock ~version_preference ~lock_dirs_arg ~print_perf_stats ~portable_lock_dir
   in
   let lock_dirs =
     Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dirs_arg workspace
-    |> List.map ~f:Path.source
+    |> List.map ~f:(fun path ->
+      let path = Path.source path in
+      (* Provided packages is empty here, it's only populated for tools *)
+      { path
+      ; lock_dir = Workspace.find_lock_dir workspace path
+      ; provided = Package_name.Map.empty
+      ; parent = Package_name.Map.empty
+      })
   in
   solve
     workspace
