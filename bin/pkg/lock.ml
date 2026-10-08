@@ -58,7 +58,6 @@ let user_lock_dir_path path =
   match (path : Path.t) with
   | In_source_tree _ -> path
   | In_build_dir _ -> path
-  (*CR-Sudha247: changing dev-tools*)
   | External _ -> Workspace.source_path_of_lock_dir_path path |> Path.source
 ;;
 

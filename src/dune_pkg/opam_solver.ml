@@ -26,8 +26,10 @@ module Priority = struct
      fed to the solver. Any change to package selection should be reflected in
      this priority rather than implemented in an ad-hoc manner *)
   type t =
-    { preferred : bool (* We prefer packages with [avoid-version: false] *)
-    ; avoid : bool
+    { (* The version locked by the parent context, tried first *)
+      preferred : bool
+    ; (* We prefer packages with [avoid-version: false] *)
+      avoid : bool
     ; version : OpamPackage.Version.t
     }
 
