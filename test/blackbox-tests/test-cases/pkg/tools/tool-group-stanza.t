@@ -56,16 +56,17 @@ Declaring the same tool in two groups is an error:
   >  (tools ocamlformat)
   >  (lock_dir))
   > (tool_group
+  >  (name dev)
   >  (tools utop ocamlformat)
   >  (lock_dir))
   > EOF
   $ dune build
-  File "dune-workspace", line 7, characters 13-24:
-  7 |  (tools utop ocamlformat)
+  File "dune-workspace", line 8, characters 13-24:
+  8 |  (tools utop ocamlformat)
                    ^^^^^^^^^^^
   Error: Tool "ocamlformat" is declared multiple times:
   - dune-workspace:4
-  - dune-workspace:7
+  - dune-workspace:8
   Hint: A tool declared in a lock_dir group may not be declared again.
   Otherwise a tool may be declared once per inherited context.
   [1]
@@ -76,16 +77,17 @@ So is declaring it twice within one group:
   > (lang dune 3.25)
   > (using unreleased 0.1)
   > (tool_group
+  >  (name dev)
   >  (tools ocamlformat ocamlformat)
   >  (lock_dir))
   > EOF
   $ dune build
-  File "dune-workspace", line 4, characters 20-31:
-  4 |  (tools ocamlformat ocamlformat)
+  File "dune-workspace", line 5, characters 20-31:
+  5 |  (tools ocamlformat ocamlformat)
                           ^^^^^^^^^^^
   Error: Tool "ocamlformat" is declared multiple times:
-  - dune-workspace:4
-  - dune-workspace:4
+  - dune-workspace:5
+  - dune-workspace:5
   Hint: A tool declared in a lock_dir group may not be declared again.
   Otherwise a tool may be declared once per inherited context.
   [1]
@@ -105,10 +107,12 @@ Two groups may not share a name:
   >  (lock_dir))
   > EOF
   $ dune build
-  File "dune-workspace", line 8, characters 7-10:
-  8 |  (name dev)
-             ^^^
+  File "dune-workspace", lines 7-10, characters 0-50:
+   7 | (tool_group
+   8 |  (name dev)
+   9 |  (tools utop)
+  10 |  (lock_dir))
   Error: Tool group "dev" is declared multiple times:
-  - dune-workspace:4
-  - dune-workspace:8
+  - dune-workspace:3
+  - dune-workspace:7
   [1]

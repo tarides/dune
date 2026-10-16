@@ -48,6 +48,10 @@ module Tool_group : sig
 
   val equal : t -> t -> bool
   val to_dyn : t -> Dyn.t
+
+  (** The group's [name] field, or the name of its only tool when the field is
+      absent. Anonymous groups with several tools are rejected at load time. *)
+  val name : t -> string
 end
 
 module Lock_dir_selection : sig
@@ -178,6 +182,11 @@ val hash : t -> int
 val pkg_enabled : t -> bool
 
 val find_lock_dir : t -> Path.t -> Lock_dir.t option
+
+(** The source-tree spelling of a lock directory's path. Lock directories
+  written under [_build] get the fake spelling [_build/<dir>/<name>]. *)
+val source_path_of_lock_dir_path : Path.t -> Path.Source.t
+
 val add_repo : t -> Dune_pkg.Pkg_workspace.Repository.t -> t
 val default_repositories : Dune_pkg.Pkg_workspace.Repository.t list
 

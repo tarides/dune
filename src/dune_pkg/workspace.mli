@@ -27,4 +27,10 @@ module Repository : sig
   val name : t -> Name.t
 end
 
+val tools_lock_dir_name : string
 val dev_tool_path_to_source_dir : Path.External.t -> Path.Source.t
+val tool_path_to_source_dir : Path.External.t -> Path.Source.t
+
+(** Maps the external path of a dev tool or tool group lock dir to its source
+    spelling, choosing the mapper by the path's first component under _build. *)
+val external_lock_dir_to_source_dir : Path.External.t -> Path.Source.t
