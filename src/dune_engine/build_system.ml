@@ -851,8 +851,6 @@ and execute_anonymous_action { Rule.Anonymous_action.action; dir; loc } ~capture
     (Lazy.force execute_anonymous_action_memo)
     { Anonymous_action.action; dir; loc; deps; capture_stdout; digest }
 
-and execute_action_stdout anon = execute_anonymous_action anon ~capture_stdout:true
-
 (* A rule can have multiple targets but calls to [execute_rule] are memoized,
    so the rule will be executed only once. *)
 and build_file_impl path =
@@ -1039,6 +1037,8 @@ and execute_rule_memo =
        ~on_event:State.on_rule_event
        execute_rule_impl)
 ;;
+
+let execute_action_stdout anon = execute_anonymous_action anon ~capture_stdout:true
 
 let () =
   Load_rules.set_current_rule_loc (fun () ->
@@ -1363,19 +1363,11 @@ let run_build_requests ?restart_started_at ~build_started_at ?build (request : R
     | exns -> Error exns)
 ;;
 
-let run ?restart_started_at ?build f =
-  run_with_error_collection
-    ?restart_started_at
-    ~build_started_at:(Time.now ())
-    ~build
-    (fun () ->
-       Fiber.collect_errors (fun () ->
-         Memo.run_with_error_handler ~handle_error_no_raise:report_early_exn f))
-;;
-
 let run_exn f =
   let open Fiber.O in
-  run f
+  run_with_error_collection ~build_started_at:(Time.now ()) ~build:None (fun () ->
+    Fiber.collect_errors (fun () ->
+      Memo.run_with_error_handler ~handle_error_no_raise:report_early_exn f))
   >>| function
   | Ok res -> res
   | Error `Already_reported -> raise Dune_util.Report_error.Already_reported
