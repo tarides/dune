@@ -92,3 +92,23 @@ needs a different version cannot be solved, even though the repository has it:
       Rejected candidates:
         bar.0.0.1: Incompatible with restriction: = 0.0.2
   [1]
+
+The delta records nothing about the parent it was solved against. After the
+parent moves to bar.0.0.2, a relocked group looks exactly the same, so nothing
+can tell a delta solved against the old parent from one solved against the new:
+
+  $ grep hash _build/.tools.locks/foo/lock.dune
+  (dependency_hash 36e640fbcda71963e7e2f689f6c96c3e)
+  $ dune pkg lock
+  Solution for dune.lock
+  
+  Dependencies common to all supported platforms:
+  - bar.0.0.2
+  $ dune tools lock foo
+  Solution for _build/.tools.locks/foo
+  
+  Dependencies common to all supported platforms:
+  - baz.0.0.1
+  - foo.0.0.1
+  $ grep hash _build/.tools.locks/foo/lock.dune
+  (dependency_hash 36e640fbcda71963e7e2f689f6c96c3e)

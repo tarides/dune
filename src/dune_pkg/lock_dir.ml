@@ -1058,6 +1058,7 @@ end
 type t =
   { version : Syntax.Version.t
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
+  ; parent_hash : Local_package.Dependency_hash.t option
   ; packages : Packages.t
   ; ocaml : (Loc.t * Package_name.t) option
   ; repos : Repositories.t
@@ -1075,6 +1076,7 @@ let remove_locs t =
 let equal
       { version
       ; dependency_hash
+      ; parent_hash
       ; packages
       ; ocaml
       ; repos
@@ -1088,6 +1090,7 @@ let equal
        (Tuple.T2.equal Loc.equal Local_package.Dependency_hash.equal)
        dependency_hash
        t.dependency_hash
+  && Option.equal Local_package.Dependency_hash.equal parent_hash t.parent_hash
   && Option.equal (Tuple.T2.equal Loc.equal Package_name.equal) ocaml t.ocaml
   && Repositories.equal repos t.repos
   && Packages.equal packages t.packages
@@ -1102,6 +1105,7 @@ let equal
 let to_dyn
       { version
       ; dependency_hash
+      ; parent_hash
       ; packages
       ; ocaml
       ; repos
@@ -1115,6 +1119,7 @@ let to_dyn
       , Dyn.option
           (Tuple.T2.to_dyn Loc.to_dyn_hum Local_package.Dependency_hash.to_dyn)
           dependency_hash )
+    ; "parent_hash", Dyn.option Local_package.Dependency_hash.to_dyn parent_hash
     ; "packages", Packages.to_dyn packages
     ; "ocaml", Dyn.option (Tuple.T2.to_dyn Loc.to_dyn_hum Package_name.to_dyn) ocaml
     ; "repos", Repositories.to_dyn repos
@@ -1158,10 +1163,18 @@ let validate_packages packages ~provided_packages =
   else Error (`Missing_dependencies missing_dependencies)
 ;;
 
+let parent_hash_of_packages (parent : Pkg.t Package_name.Map.t) =
+  Package_name.Map.to_list_map parent ~f:(fun name (pkg : Pkg.t) ->
+    name, pkg.info.version)
+  |> Dyn.list (Dyn.pair Package_name.to_dyn Package_version.to_dyn)
+  |> Local_package.Dependency_hash.of_dyn
+;;
+
 let create_latest_version
       packages
       ~local_packages
       ~provided_packages
+      ~parent_packages
       ~ocaml
       ~repos
       ~expanded_solver_variable_bindings
@@ -1209,8 +1222,14 @@ let create_latest_version
       Solver_stats.Expanded_variable_bindings.remove_platform_specific
         expanded_solver_variable_bindings
   in
+  let parent_hash =
+    match Package_name.Map.is_empty parent_packages with
+    | true -> None
+    | false -> Some (parent_hash_of_packages parent_packages)
+  in
   { version
   ; dependency_hash
+  ; parent_hash
   ; packages
   ; ocaml
   ; repos = { complete; used }
@@ -1229,6 +1248,7 @@ let encode_metadata
       ~portable_lock_dir
       { version
       ; dependency_hash
+      ; parent_hash
       ; ocaml
       ; repos
       ; packages = _
@@ -1254,6 +1274,13 @@ let encode_metadata
            [ string "dependency_hash"
            ; Local_package.Dependency_hash.encode dependency_hash
            ]
+       ])
+  @ (match parent_hash with
+     | None -> []
+     | Some parent_hash ->
+       [ list
+           sexp
+           [ string "parent_hash"; Local_package.Dependency_hash.encode parent_hash ]
        ])
   @ (match ocaml with
      | None -> []
@@ -1725,6 +1752,7 @@ struct
       |> Result.map ~f:(fun () ->
         { version
         ; dependency_hash
+        ; parent_hash = None
         ; packages
         ; ocaml
         ; repos

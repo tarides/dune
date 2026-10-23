@@ -55,12 +55,12 @@ module Dependency_hash = struct
         [ Pp.textf "Dependency hash is not a valid md5 hash: %s" hash ]
   ;;
 
+  let of_dyn dyn = Dyn.to_string dyn |> Md5.string
+
   let of_dependency_formula formula =
     match Dependency_formula.has_entries formula with
     | false -> None
-    | true ->
-      let hashable = formula |> Dependency_formula.to_dyn |> Dyn.to_string in
-      Some (Md5.string hashable)
+    | true -> Some (of_dyn (Dependency_formula.to_dyn formula))
   ;;
 end
 

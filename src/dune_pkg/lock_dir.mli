@@ -108,6 +108,10 @@ end
 type t = private
   { version : Syntax.Version.t
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
+  ; parent_hash : Local_package.Dependency_hash.t option
+    (** Hash of the inherited context's packages this lock directory was
+        solved against. Only present in the lock directory of an inheriting
+        tool group. *)
   ; packages : Packages.t
     (** It's guaranteed that this map will contain an entry for all dependencies
       of all packages in this map. That is, the set of packages is closed under
@@ -130,6 +134,10 @@ val to_dyn : t -> Dyn.t
     handle multiple versions of the same package. *)
 val uses_versioned_paths : t -> bool
 
+(** Hash of the names and versions of [packages], the packages of an
+    inherited context. The same packages give the same hash. *)
+val parent_hash_of_packages : Pkg.t Package_name.Map.t -> Local_package.Dependency_hash.t
+
 (** [create_latest_version packages ~ocaml ~repos
     ~expanded_solver_variable_bindings] raises a [Code_error] if [packages] is
     not closed under the "depends on" relationship between packages. Every
@@ -142,6 +150,9 @@ val create_latest_version
        (** Packages that may be depended on without appearing in [packages]
            because something outside this lock directory supplies them. Always
            includes dune. *)
+  -> parent_packages:Pkg.t Package_name.Map.t
+       (** Packages of the inherited context this lock directory was solved
+           against. Empty unless locking an inheriting tool group. *)
   -> ocaml:(Loc.t * Package_name.t) option
   -> repos:Opam_repo.t list option
   -> expanded_solver_variable_bindings:Solver_stats.Expanded_variable_bindings.t
