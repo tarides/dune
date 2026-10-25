@@ -499,7 +499,6 @@ and execute_action_for_rule
           let input =
             let env = Action_trace.add_to_env action_trace env in
             { Action_exec.root
-            ; context (* can be derived from the root *)
             ; env
             ; targets = Some targets
             ; rule_loc = loc
@@ -643,7 +642,7 @@ and execute_rule_action
         | Anonymous_action _ -> true
       in
       let force_rerun = !Clflags.force && is_test in
-      force_rerun || Dep.Map.has_universe facts
+      force_rerun || Dep.Map.mem facts Dep.universe
     in
     let rule_digest =
       compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_parameters
@@ -1208,7 +1207,6 @@ let run_with_error_collection ?restart_started_at ~build_started_at ~build colle
                [ "state", State.to_dyn state ]
          in
          Dtemp.clear ();
-         Sandbox.cleanup_pending_targets ();
          Target_promotion.save ();
          let* outcome =
            let finalize_diff_promotion () =

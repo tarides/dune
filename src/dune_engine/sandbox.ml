@@ -9,42 +9,6 @@ let with_live_sandbox_slot ~f =
   Fiber.Throttle.run (Lazy.force live_sandbox_throttle) ~size:1 ~f
 ;;
 
-module Pending_targets = struct
-  (* All file and directory targets of non-sandboxed actions that are currently
-     being executed. On exit, we need to delete them as they might contain
-     garbage. *)
-
-  let files = Path.Build.Table.create 128
-  let dirs = Path.Build.Table.create 128
-
-  let remove targets =
-    Targets.Validated.iter
-      targets
-      ~file:(Path.Build.Table.remove files)
-      ~dir:(Path.Build.Table.remove dirs)
-  ;;
-
-  let add targets =
-    Targets.Validated.iter
-      targets
-      ~file:(fun path -> Path.Build.Table.set files path ())
-      ~dir:(fun path -> Path.Build.Table.set dirs path ())
-  ;;
-
-  let cleanup () =
-    Exn.protect
-      ~f:(fun () ->
-        Path.Build.Table.iteri files ~f:(fun path () ->
-          Path.Build.to_string path |> Fpath.unlink_no_err);
-        Path.Build.Table.iteri dirs ~f:(fun path () -> Path.rm_rf (Path.build path)))
-      ~finally:(fun () ->
-        Path.Build.Table.clear files;
-        Path.Build.Table.clear dirs)
-  ;;
-end
-
-let cleanup_pending_targets = Pending_targets.cleanup
-
 let maybe_async f =
   (* It would be nice to do this check only once and return a function, but the
      type of this function would need to be polymorphic which is forbidden by the
@@ -565,7 +529,10 @@ let failed_to_delete_sandbox dir reason =
 
 let destroy = function
   | No_sandbox { targets } ->
-    Pending_targets.remove targets;
+    Targets.Validated.iter
+      targets
+      ~file:(fun path -> Path.Build.to_string path |> Fpath.unlink_no_err)
+      ~dir:(fun path -> Path.rm_rf ~chmod:true (Path.build path));
     Fiber.return ()
   | Sandboxed t ->
     let open Fiber.O in
@@ -585,9 +552,17 @@ let destroy = function
 let with_ ~mode corrections ~rule_loc ~dirs ~deps ~rule_dir ~rule_digest ~targets ~f =
   match mode with
   | None ->
-    Pending_targets.add targets;
+    let open Fiber.O in
     let sandbox = No_sandbox { targets } in
-    Fiber.finalize ~finally:(fun () -> destroy sandbox) (fun () -> f sandbox)
+    Fiber.collect_errors (fun () -> f sandbox)
+    >>= (function
+     | Ok result -> Fiber.return result
+     | Error errors ->
+       let* cleanup = Fiber.collect_errors (fun () -> destroy sandbox) in
+       Fiber.reraise_all
+         (match cleanup with
+          | Ok () -> errors
+          | Error cleanup_errors -> errors @ cleanup_errors))
   | Some mode ->
     with_live_sandbox_slot ~f:(fun () ->
       let open Fiber.O in
