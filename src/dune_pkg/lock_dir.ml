@@ -1307,6 +1307,14 @@ let encode_metadata
   else []
 ;;
 
+type metadata =
+  { ocaml : (Loc.t * Package_name.t) option
+  ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
+  ; repos : Repositories.t
+  ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
+  ; solved_for_platforms : (Loc.t * Solver_env.t list) option
+  }
+
 let decode_metadata =
   let open Decoder in
   fields
@@ -1322,11 +1330,12 @@ let decode_metadata =
      and+ solved_for_platforms =
        field_o "solved_for_platforms" (located (repeat (enter Solver_env.decode)))
      in
-     ( ocaml
-     , dependency_hash
-     , repos
-     , expanded_solver_variable_bindings
-     , solved_for_platforms ))
+     { ocaml
+     ; dependency_hash
+     ; repos
+     ; expanded_solver_variable_bindings
+     ; solved_for_platforms
+     })
 ;;
 
 module Package_filename = struct
@@ -1588,43 +1597,17 @@ module Make_load (Io : sig
 struct
   let load_metadata metadata_file_path =
     let open Io.O in
-    let+ ( syntax
-         , version
-         , dependency_hash
-         , ocaml
-         , repos
-         , expanded_solver_variable_bindings
-         , solved_for_platforms )
-      =
+    let+ syntax, version, metadata =
       Io.with_lexbuf_from_file metadata_file_path ~f:(fun lexbuf ->
         Metadata.parse_contents
           lexbuf
           ~f:(fun { Metadata.Lang.Instance.syntax; data = (); version } ->
             let open Decoder in
-            let+ ( ocaml
-                 , dependency_hash
-                 , repos
-                 , expanded_solver_variable_bindings
-                 , solved_for_platforms )
-              =
-              decode_metadata
-            in
-            ( syntax
-            , version
-            , dependency_hash
-            , ocaml
-            , repos
-            , expanded_solver_variable_bindings
-            , solved_for_platforms )))
+            let+ metadata = decode_metadata in
+            syntax, version, metadata))
     in
     if Syntax.Name.equal (Syntax.name syntax) (Syntax.name Dune_lang.Pkg.syntax)
-    then
-      ( version
-      , dependency_hash
-      , ocaml
-      , repos
-      , expanded_solver_variable_bindings
-      , solved_for_platforms )
+    then version, metadata
     else
       User_error.raise
         [ Pp.textf
@@ -1711,14 +1694,17 @@ struct
           Event.Async.pkg_load_lock_dir ~path:(Path.to_string lock_dir_path)))
     in
     let open Io.O in
-    let* ( version
-         , dependency_hash
-         , ocaml
-         , repos
-         , expanded_solver_variable_bindings
-         , solved_for_platforms )
-      =
+    let* version, metadata =
       load_metadata (Path.relative_fname lock_dir_path metadata_filename)
+    in
+    let { ocaml
+        ; dependency_hash
+        ; repos
+        ; expanded_solver_variable_bindings
+        ; solved_for_platforms
+        }
+      =
+      metadata
     in
     let portable_lock_dir, solved_for_platforms =
       match solved_for_platforms with
@@ -1847,7 +1833,7 @@ let loc_in_source_tree loc =
     { pos with pos_fname })
 ;;
 
-let check_if_solved_for_platform { solved_for_platforms; _ } ~platform =
+let check_if_solved_for_platform ({ solved_for_platforms; _ } : t) ~platform =
   let loc, solved_for_platforms = solved_for_platforms in
   if List.is_empty solved_for_platforms
   then
