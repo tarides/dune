@@ -121,7 +121,7 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
            when [dst] is a directory target. *)
       match ectx.metadata.purpose with
       | Build_job (Some { dirs; _ }) when Filename.Set.mem dirs (Path.basename dst) ->
-        Tree_copy.copy ~src ~dst ~copy_file ~mkdir ~on_unsupported ()
+        Tree_traversal.traverse ~src ~dst ~on_file:copy_file ~mkdir ~on_unsupported ()
       | _ -> copy_file ~src ~dst
     in
     Fiber.return ()
@@ -130,7 +130,7 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
     Io.portable_symlink ~overwrite:true ~src ~dst:(Path.build dst);
     Fiber.return ()
   | Hardlink (src, dst) ->
-    Io.portable_hardlink ~src ~dst:(Path.build dst);
+    Io.portable_hardlink ~overwrite:true ~src ~dst:(Path.build dst);
     Fiber.return ()
   | System command ->
     let prog, arg =
