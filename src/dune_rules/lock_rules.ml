@@ -189,7 +189,7 @@ let lock_action
     }
 ;;
 
-let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
+let setup_lock_rules ~dir ~lock_dir : Gen_rules.t =
   let target = Path.Build.append_local dir lock_dir in
   let lock_dir_param = lock_dir in
   let rules =
@@ -407,7 +407,7 @@ let setup_dev_tool_lock_rules ~dir dev_tool =
 ;;
 
 let setup_rules ~components ~dir =
-  let empty = Gen_rules.rules_here Gen_rules.Rules.empty in
+  let empty = Gen_rules.no_rules in
   match components with
   | [ ".lock" ] ->
     let* workspace = Workspace.workspace () in
@@ -417,7 +417,7 @@ let setup_rules ~components ~dir =
       let lock_dir = Path.Source.to_local lock_dir_path in
       let+ lock_rule = setup_lock_rules_with_source workspace ~dir ~lock_dir in
       Gen_rules.combine rules lock_rule)
-  | ".lock" :: _ :: _ -> Memo.return (Gen_rules.redirect_to_parent Gen_rules.Rules.empty)
+  | ".lock" :: _ :: _ -> Memo.return (Gen_rules.Redirect_to_parent Gen_rules.Rules.empty)
   | [ ".dev-tool-locks" ] ->
     Memo.List.fold_left Dev_tool.all ~init:empty ~f:(fun rules dev_tool ->
       let+ dev_tool_rules = setup_dev_tool_lock_rules ~dir dev_tool in

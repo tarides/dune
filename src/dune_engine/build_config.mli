@@ -10,15 +10,14 @@ module Context_type : sig
 end
 
 module Gen_rules : sig
+  type rules := Rules.t
+
   module Build_only_sub_dirs : sig
     (** The set of either directory targets or internally generated directories,
         indexed by their parent build directory. *)
     type t = Subdir_set.t Path.Build.Map.t
 
-    val empty : t
-    val iter_dirs_containing_sub_dirs : t -> f:(Path.Build.t -> unit) -> unit
     val singleton : dir:Path.Build.t -> Subdir_set.t -> t
-    val find : t -> Path.Build.t -> Subdir_set.t
     val union : t -> t -> t
   end
 
@@ -39,8 +38,6 @@ module Gen_rules : sig
       ; rules : Rules.t Memo.t
       }
 
-    type rules := Rules.t
-
     val create
       :  ?build_dir_only_sub_dirs:Build_only_sub_dirs.t
       -> ?directory_targets:Loc.t Path.Build.Map.t
@@ -48,22 +45,22 @@ module Gen_rules : sig
       -> t
 
     val empty : t
-
-    (** Raises a code error if there are multiple rules for the same target. *)
-    val combine_exn : t -> t -> t
   end
 
-  module Gen_rules_result : sig
-    type t =
-      | Rules of Rules.t
-      | Unknown_context
-      | Redirect_to_parent of Rules.t
+  type t =
+    | Rules of Rules.t
+    | Unknown_context
+    | Redirect_to_parent of Rules.t
 
-    val redirect_to_parent : Rules.t -> t
-    val rules_here : Rules.t -> t
-    val unknown_context : t
-    val no_rules : t
-  end
+  val make
+    :  ?build_dir_only_sub_dirs:Build_only_sub_dirs.t
+    -> ?directory_targets:Loc.t Path.Build.Map.t
+    -> rules Memo.t
+    -> t
+
+  val make_empty : dir:Path.Build.t -> Subdir_set.t -> t
+  val no_rules : t
+  val combine : t -> t -> t
 end
 
 module type Source_tree = sig
@@ -89,10 +86,7 @@ val set
         -> unit Fiber.t)
   -> sandboxing_preference:Sandbox_mode.t list
   -> rule_generator:
-       (Context_name.t
-        -> dir:Path.Build.t
-        -> string list
-        -> Gen_rules.Gen_rules_result.t Memo.t)
+       (Context_name.t -> dir:Path.Build.t -> string list -> Gen_rules.t Memo.t)
   -> implicit_default_alias:(Path.Build.t -> unit Action_builder.t option Memo.t)
   -> execution_parameters:
        (Context_name.t -> dir:Path.Build.t -> Execution_parameters.t Memo.t)
@@ -102,10 +96,7 @@ val set
 type t = private
   { contexts : (Build_context.t * Context_type.t) Context_name.Map.t Memo.Lazy.t
   ; rule_generator :
-      Context_name.t
-      -> dir:Path.Build.t
-      -> string list
-      -> Gen_rules.Gen_rules_result.t Memo.t
+      Context_name.t -> dir:Path.Build.t -> string list -> Gen_rules.t Memo.t
     (** Generate rules for a directory in the corresponding build context.
         Receives the directory and its path components after the build context.
         May only generate rules whose targets are descendants of [dir]. *)
