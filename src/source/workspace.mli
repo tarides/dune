@@ -25,11 +25,13 @@ module Lock_dir : sig
 end
 
 module Tool_group : sig
-  (** A group that inherits from a context is solved on top of that context's
-      lock directory and is only usable from that context. [shared_packages]
-      names the context's packages (with their dependencies) that must be
-      reused; [None] means reuse where possible. The list is never empty:
-      an empty field is rejected when decoding. *)
+
+  (** [(inherit (context <name>))]: the group is solved on top of that context's
+          lock directory and reuses its packages where possible.
+          [shared_packages] forces the dependency closure of the listed packages
+          to be the same as the parent's versions. No packages mentioned in
+          [shared_packages] means the solver will try to match as many packages
+          from the parent as possible. *)
   type inherit_ =
     { context : Loc.t * Context_name.t
     ; shared_packages : (Loc.t * Package.Name.t) list option
@@ -48,6 +50,10 @@ module Tool_group : sig
 
   val equal : t -> t -> bool
   val to_dyn : t -> Dyn.t
+
+  (** The group's [name] field, or the name of its only tool when the field is
+      absent. Anonymous groups with several tools are rejected at load time. *)
+  val name : t -> string
 end
 
 module Lock_dir_selection : sig
