@@ -100,6 +100,11 @@ let unused_files_in_cache () =
       else None)
 ;;
 
+let unused_files_size files =
+  List.fold_left files ~init:0L ~f:(fun total (file : Unused_file.t) ->
+    Int64.add total (Int64.of_int file.size))
+;;
+
 (* Dune uses [ctime] to prioritise entries for deletion. How does this work?
 
    - In the [Hardlink] mode, an entry to become unused when it loses the last
@@ -113,24 +118,31 @@ let unused_files_in_cache () =
      entry's [ctime]. This means that the trimmer will start deleting entries
      starting from the one that was least recently created or used. *)
 let trim ~goal =
+  (* An exact byte goal may leave zero-byte entries, so keep sorting unless
+     the goal strictly exceeds the total unused size. *)
   let files =
     if goal <= 0L
     then []
-    else
-      unused_files_in_cache ()
-      |> List.of_seq
-      |> List.sort ~compare:(fun x y -> Float.compare x.Unused_file.ctime y.ctime)
+    else (
+      let files = unused_files_in_cache () |> List.of_seq in
+      let overhead = unused_files_size files in
+      if goal > overhead
+      then files
+      else List.sort files ~compare:(fun x y -> Float.compare x.ctime y.ctime))
   in
-  let delete (trimmed_so_far : Trimming_result.t) { Unused_file.path; size; _ } =
+  let rec delete (trimmed_so_far : Trimming_result.t) files =
     if trimmed_so_far.trimmed_bytes >= goal
     then trimmed_so_far
     else (
-      Fpath.unlink_no_err (Path.to_string path);
-      (* CR-someday amokhov: We should really be using block_size * #blocks
-         because that's how much we save actually. *)
-      Trimming_result.add trimmed_so_far ~bytes:size)
+      match files with
+      | [] -> trimmed_so_far
+      | { Unused_file.path; size; _ } :: rest ->
+        Fpath.unlink_no_err (Path.to_string path);
+        (* CR-someday amokhov: We should really be using block_size * #blocks
+           because that's how much we save actually. *)
+        delete (Trimming_result.add trimmed_so_far ~bytes:size) rest)
   in
-  let trimmed_so_far = List.fold_left ~init:Trimming_result.empty ~f:delete files in
+  let trimmed_so_far = delete Trimming_result.empty files in
   trim_broken_metadata_entries ~trimmed_so_far
 ;;
 
