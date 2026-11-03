@@ -616,7 +616,8 @@ let%expect_test "a lock dir may depend on packages provided from outside it" =
   load provided_with_bar;
   [%expect {| loaded |}];
   load provided_packages;
-  [%expect {|
+  [%expect
+    {|
     File "delta_lock_dir/foo.pkg", line 3, characters 9-12:
     The package "foo" depends on the package "bar", but "bar" does not appear in
     the lockdir delta_lock_dir.
@@ -625,4 +626,38 @@ let%expect_test "a lock dir may depend on packages provided from outside it" =
     Hint: This could indicate that the lockdir is corrupted. Delete it and then
     regenerate it by running: 'dune pkg lock'
     |}]
+;;
+
+let%expect_test "a delta is up to date only against the parent it was solved for" =
+  let parent version =
+    let name = Package_name.of_string "bar" in
+    Package_name.Map.singleton
+      name
+      (empty_package name ~version:(Package_version.of_string version))
+  in
+  let lock_dir ~parent_packages =
+    Lock_dir.create_latest_version
+      Package_name.Map.empty
+      ~local_packages:[]
+      ~provided_packages
+      ~parent_packages
+      ~ocaml:None
+      ~repos:None
+      ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
+      ~solved_for_platforms:[]
+      ~portable_lock_dir:false
+  in
+  let check t ~parent =
+    print_endline
+      (match Lock_dir.up_to_date t ~parent with
+       | `Valid -> "valid"
+       | `Stale -> "stale")
+  in
+  let delta = lock_dir ~parent_packages:(parent "0.0.1") in
+  check delta ~parent:(parent "0.0.1");
+  [%expect {| valid |}];
+  check delta ~parent:(parent "0.0.2");
+  [%expect {| stale |}];
+  check (lock_dir ~parent_packages:Package_name.Map.empty) ~parent:(parent "0.0.2");
+  [%expect {| valid |}]
 ;;

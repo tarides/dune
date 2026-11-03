@@ -138,6 +138,11 @@ val uses_versioned_paths : t -> bool
     inherited context. The same packages give the same hash. *)
 val parent_hash_of_packages : Pkg.t Package_name.Map.t -> Local_package.Dependency_hash.t
 
+(** Whether a delta lock dir was solved against [parent]. [`Valid] when [t]
+    is not a delta or the hash of [parent] matches the one recorded in [t];
+    [`Stale] when the parent's packages have changed since. *)
+val up_to_date : t -> parent:Pkg.t Package_name.Map.t -> [ `Valid | `Stale ]
+
 (** [create_latest_version packages ~ocaml ~repos
     ~expanded_solver_variable_bindings] raises a [Code_error] if [packages] is
     not closed under the "depends on" relationship between packages. Every

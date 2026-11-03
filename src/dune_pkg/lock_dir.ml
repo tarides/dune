@@ -1170,6 +1170,17 @@ let parent_hash_of_packages (parent : Pkg.t Package_name.Map.t) =
   |> Local_package.Dependency_hash.of_dyn
 ;;
 
+let up_to_date (t : t) ~parent =
+  match t.parent_hash with
+  | None -> `Valid
+  | Some stored ->
+    (match
+       Local_package.Dependency_hash.equal stored (parent_hash_of_packages parent)
+     with
+     | true -> `Valid
+     | false -> `Stale)
+;;
+
 let create_latest_version
       packages
       ~local_packages
