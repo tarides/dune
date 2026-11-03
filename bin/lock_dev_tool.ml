@@ -175,7 +175,11 @@ let lockdir_status dev_tool =
   | false -> Memo.return `No_lockdir
   | true ->
     let dev_tool_lock_dir = Path.external_ dev_tool_lock_dir in
-    (match Lock_dir.read_disk dev_tool_lock_dir with
+    (match
+       Lock_dir.read_disk
+         dev_tool_lock_dir
+         ~provided_packages:(Package_name.Set.singleton Dune_pkg.Dune_dep.name)
+     with
      | Error _ -> Memo.return `No_lockdir
      | Ok { packages; _ } ->
        let* platform =

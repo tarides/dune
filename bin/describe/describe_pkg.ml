@@ -12,7 +12,11 @@ module Show_lock = struct
     Fiber.parallel_map lock_dir_paths ~f:(fun lock_dir_path ->
       let lock_dir_path = Path.source lock_dir_path in
       let+ platform = Pkg.Pkg_common.solver_env_from_system_and_context ~lock_dir_path in
-      let lock_dir = Lock_dir.read_disk_exn lock_dir_path in
+      let lock_dir =
+        Lock_dir.read_disk_exn
+          lock_dir_path
+          ~provided_packages:(Package_name.Set.singleton Dune_pkg.Dune_dep.name)
+      in
       let packages =
         Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
         |> Package_name.Map.values
@@ -128,7 +132,11 @@ module List_locked_dependencies = struct
     List.filter_map lock_dirs ~f:(fun lock_dir_path ->
       if Fpath.exists (Path.Source.to_string lock_dir_path)
       then (
-        match Lock_dir.read_disk_exn (Path.source lock_dir_path) with
+        match
+          Lock_dir.read_disk_exn
+            (Path.source lock_dir_path)
+            ~provided_packages:(Package_name.Set.singleton Dune_pkg.Dune_dep.name)
+        with
         | lock_dir -> Some (lock_dir_path, lock_dir)
         | exception User_error.E e ->
           User_warning.emit

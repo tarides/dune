@@ -1770,15 +1770,8 @@ module Load_immediate = Make_load (struct
     let with_lexbuf_from_file = Io.with_lexbuf_from_file
   end)
 
-let read_disk path =
-  Load_immediate.load path ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
-;;
-
-let read_disk_exn path =
-  Load_immediate.load_exn
-    path
-    ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
-;;
+let read_disk = Load_immediate.load
+let read_disk_exn = Load_immediate.load_exn
 
 let transitive_dependency_closure t ~platform start =
   let missing_packages =

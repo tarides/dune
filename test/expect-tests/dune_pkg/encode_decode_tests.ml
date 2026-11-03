@@ -69,7 +69,7 @@ let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
     prepare ~portable_lock_dir:false ~lock_dir_path ~files:Package_name.Map.empty lock_dir
     |> commit);
   let lock_dir_round_tripped =
-    try Lock_dir.read_disk_exn lock_dir_path with
+    try Lock_dir.read_disk_exn lock_dir_path ~provided_packages with
     | User_error.E _ as exn ->
       let metadata_path = Path.relative_fname lock_dir_path Lock_dir.metadata_filename in
       let metadata_file_contents = Io.read_file_exn metadata_path in
@@ -574,5 +574,55 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
         { variable_values = []; unset_variables = [] }
     ; solved_for_platforms = ("<none>:1", [])
     }
+    |}]
+;;
+
+let%expect_test "a lock dir may depend on packages provided from outside it" =
+  let lock_dir_path = Path.of_string "delta_lock_dir" in
+  let bar = Package_name.of_string "bar" in
+  let foo =
+    let name = Package_name.of_string "foo" in
+    let pkg = empty_package name ~version:(Package_version.of_string "0.1.0") in
+    ( name
+    , { pkg with
+        depends =
+          Lock_dir.Conditional_choice.singleton
+            Dune_pkg.Solver_env.empty
+            [ { Dependency.loc = Loc.none; name = bar } ]
+      } )
+  in
+  let provided_with_bar = Package_name.Set.add provided_packages bar in
+  Lock_dir.Write_disk.(
+    prepare
+      ~portable_lock_dir:false
+      ~lock_dir_path
+      ~files:Package_name.Map.empty
+      (Lock_dir.create_latest_version
+         (Package_name.Map.singleton (fst foo) (snd foo))
+         ~local_packages:[]
+         ~provided_packages:provided_with_bar
+         ~parent_packages:Package_name.Map.empty
+         ~ocaml:None
+         ~repos:None
+         ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
+         ~solved_for_platforms:[]
+         ~portable_lock_dir:false)
+    |> commit);
+  let load provided_packages =
+    match Lock_dir.read_disk lock_dir_path ~provided_packages with
+    | Ok _ -> print_endline "loaded"
+    | Error msg -> print_endline (User_message.to_string msg)
+  in
+  load provided_with_bar;
+  [%expect {| loaded |}];
+  load provided_packages;
+  [%expect {|
+    File "delta_lock_dir/foo.pkg", line 3, characters 9-12:
+    The package "foo" depends on the package "bar", but "bar" does not appear in
+    the lockdir delta_lock_dir.
+    At least one package dependency is itself not present as a package in
+    the lockdir delta_lock_dir.
+    Hint: This could indicate that the lockdir is corrupted. Delete it and then
+    regenerate it by running: 'dune pkg lock'
     |}]
 ;;

@@ -178,8 +178,15 @@ module Write_disk : sig
   val commit : t -> unit
 end
 
-val read_disk : Path.t -> (t, User_message.t) result
-val read_disk_exn : Path.t -> t
+(** [provided_packages] are the packages that may be depended on without
+    appearing in the lock directory because something outside it supplies
+    them. Always includes dune. *)
+val read_disk
+  :  Path.t
+  -> provided_packages:Package_name.Set.t
+  -> (t, User_message.t) result
+
+val read_disk_exn : Path.t -> provided_packages:Package_name.Set.t -> t
 
 module Make_load (Io : sig
     include Monad.S
@@ -188,9 +195,6 @@ module Make_load (Io : sig
     val readdir_with_kinds : Path.t -> (Filename.t * Unix.file_kind) list t
     val with_lexbuf_from_file : Path.t -> f:(Lexing.lexbuf -> 'a) -> 'a t
   end) : sig
-  (** [provided_packages] are the packages that may be depended on without
-      appearing in the lock directory because something outside it supplies
-      them. Always includes dune. *)
   val load
     :  Path.t
     -> provided_packages:Package_name.Set.t
