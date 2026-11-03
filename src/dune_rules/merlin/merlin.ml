@@ -755,6 +755,49 @@ module Processed = struct
   ;;
 end
 
+module Write = struct
+  module Spec = struct
+    type ('path, 'target) t = Processed.Unindexed.t Nonempty_list.t * Digest.t * 'target
+
+    let name = "write-merlin-conf"
+    let version = 1
+    let runs_process = false
+    let can_run_in_action_runner = false
+    let is_useful_to_memoize = true
+    let bimap (configurations, digest, target) _path f = configurations, digest, f target
+
+    let encode (_, digest, target) _path target_to_sexp : Sexp.t =
+      List [ target_to_sexp target; Atom (Digest.to_string digest) ]
+    ;;
+
+    let action (configurations, _, target) ~ectx:_ ~eenv:_ =
+      Processed.Persist.dump (Path.build target) configurations;
+      Fiber.return ()
+    ;;
+  end
+
+  module A = Action_ext.Make (Spec)
+
+  let action configurations_with_digests ~target =
+    let configurations = Nonempty_list.map configurations_with_digests ~f:fst in
+    let without_indexes =
+      Nonempty_list.map
+        configurations
+        ~f:(fun ({ Processed.Unindexed.config; _ } as configuration) ->
+          { configuration with config = { config with indexes = [] } })
+    in
+    let content = Processed.Persist.to_string without_indexes in
+    let index_digests = Nonempty_list.to_list_map configurations_with_digests ~f:snd in
+    let digest =
+      let d = Digest.Manual.create () in
+      Digest.Manual.string d content;
+      Digest.Manual.list d index_digests ~f:Digest.Manual.digest;
+      Digest.Manual.get d
+    in
+    A.action (configurations, digest, target)
+  ;;
+end
+
 let obj_dir_of_lib kind mode obj_dir =
   (match kind, mode with
    | `Private, Compilation_mode.Ocaml -> Obj_dir.byte_dir
@@ -767,8 +810,7 @@ let obj_dir_of_lib kind mode obj_dir =
 module Unprocessed = struct
   (* We store separate information for each "module". These information do not
      reflect the actual content of the Merlin configuration yet but are needed
-     for it's elaboration via the function [process : Unprocessed.t ... ->
-     Processed.Unindexed.t] *)
+     for its elaboration by [process]. *)
   type config =
     { stdlib_dir : Path.t
     ; requires_compile : Lib.t list Resolve.t
@@ -914,7 +956,7 @@ module Unprocessed = struct
          Some { Processed.flag = Processed.Pp_kind.Ppx; args })
   ;;
 
-  let src_dirs =
+  let local_src_dirs =
     let module Key = struct
       module Super_context = Super_context.As_memo_key
 
@@ -946,10 +988,7 @@ module Unprocessed = struct
            >>| Modules.source_dirs
            >>| Path.Set.map ~f:Path.drop_optional_build_context)
     in
-    fun sctx lib ~for_ ->
-      match Lib.Local.of_lib lib with
-      | None -> Lib.info lib |> Lib_info.src_dir |> Path.Set.singleton |> Memo.return
-      | Some lib -> Memo.exec local (sctx, lib, for_)
+    fun sctx lib ~for_ -> Memo.exec local (sctx, lib, for_)
   ;;
 
   module Per_item_action_builder =
@@ -962,30 +1001,44 @@ module Unprocessed = struct
   ;;
 
   let add_lib_dirs sctx ~for_ libs =
-    Memo.map_reduce
-      libs
-      ~empty:(Path.Set.empty, Path.Set.empty, Path.Set.empty)
-      ~combine:(fun (src_dirs1, obj_dirs1, cmt_dirs1) (src_dirs2, obj_dirs2, cmt_dirs2) ->
-        ( Path.Set.union src_dirs1 src_dirs2
-        , Path.Set.union obj_dirs1 obj_dirs2
-        , Path.Set.union cmt_dirs1 cmt_dirs2 ))
-      ~f:(fun lib ->
-        let+ src_dirs = src_dirs sctx lib ~for_ in
-        let obj_dir = Lib.info lib |> Lib_info.obj_dir in
-        let public_obj_dir = obj_dir_of_lib `Public for_ obj_dir in
-        let cmi_kind : Lib_mode.Cm_kind.t =
-          match for_ with
-          | Ocaml -> Ocaml Cmi
-          | Melange -> Melange Cmi
-        in
-        let cmt_dir = Obj_dir.cm_dir obj_dir cmi_kind Public in
-        let cmt_dirs =
-          if Path.equal public_obj_dir cmt_dir
-          then Path.Set.empty
-          else Path.Set.singleton cmt_dir
-        in
-        src_dirs, Path.Set.singleton public_obj_dir, cmt_dirs)
-    |> Action_builder.of_memo
+    let cmi_kind : Lib_mode.Cm_kind.t =
+      match for_ with
+      | Compilation_mode.Ocaml -> Ocaml Cmi
+      | Melange -> Melange Cmi
+    in
+    let local_libs, installed_src_dirs, obj_dirs, cmt_dirs =
+      List.fold_left
+        libs
+        ~init:([], [], [], [])
+        ~f:(fun (local_libs, src_dirs, obj_dirs, cmt_dirs) lib ->
+          let info = Lib.info lib in
+          let obj_dir = Lib_info.obj_dir info in
+          let public_obj_dir = obj_dir_of_lib `Public for_ obj_dir in
+          let obj_dirs = public_obj_dir :: obj_dirs in
+          let cmt_dir = Obj_dir.cm_dir obj_dir cmi_kind Public in
+          let cmt_dirs =
+            if Path.equal public_obj_dir cmt_dir then cmt_dirs else cmt_dir :: cmt_dirs
+          in
+          match Lib.Local.of_lib lib with
+          | None ->
+            let src_dirs = Lib_info.src_dir info :: src_dirs in
+            local_libs, src_dirs, obj_dirs, cmt_dirs
+          | Some lib -> lib :: local_libs, src_dirs, obj_dirs, cmt_dirs)
+    in
+    let installed_src_dirs = Path.Set.of_list installed_src_dirs in
+    let obj_dirs = Path.Set.of_list obj_dirs in
+    let cmt_dirs = Path.Set.of_list cmt_dirs in
+    let dirs =
+      let+ src_dirs =
+        Memo.map_reduce
+          (List.rev local_libs)
+          ~empty:Path.Set.empty
+          ~combine:Path.Set.union
+          ~f:(fun lib -> local_src_dirs sctx lib ~for_)
+      in
+      Path.Set.union src_dirs installed_src_dirs, obj_dirs, cmt_dirs
+    in
+    Action_builder.of_memo dirs
   ;;
 
   let process
@@ -1012,7 +1065,7 @@ module Unprocessed = struct
     =
     let open Action_builder.O in
     let context = Super_context.context sctx in
-    let+ config =
+    let+ config, indexes_digest =
       let* stdlib_dir =
         Action_builder.of_memo
         @@
@@ -1057,7 +1110,7 @@ module Unprocessed = struct
                List.concat [ requires_compile; libs ])
       in
       let+ flags = flags
-      and+ indexes = Ocaml_index.context_indexes context ~for_
+      and+ indexes, indexes_digest = Ocaml_index.context_indexes context ~for_
       and+ deps_src_dirs, deps_obj_dirs, deps_cmt_dirs =
         add_lib_dirs sctx ~for_ requires_compile
       and+ hidden_src_dirs, hidden_obj_dirs, hidden_cmt_dirs =
@@ -1071,18 +1124,19 @@ module Unprocessed = struct
       let obj_dirs = Path.Set.union deps_obj_dirs objs_dirs in
       let cmt_dirs = Path.Set.union deps_cmt_dirs hidden_cmt_dirs in
       let source_root = Path.Source.root |> Path.source in
-      { Processed.stdlib_dir
-      ; source_root
-      ; src_dirs
-      ; obj_dirs
-      ; cmt_dirs
-      ; hidden_src_dirs
-      ; hidden_obj_dirs
-      ; flags
-      ; extensions
-      ; indexes
-      ; parameters
-      }
+      ( { Processed.stdlib_dir
+        ; source_root
+        ; src_dirs
+        ; obj_dirs
+        ; cmt_dirs
+        ; hidden_src_dirs
+        ; hidden_obj_dirs
+        ; flags
+        ; extensions
+        ; indexes
+        ; parameters
+        }
+      , indexes_digest )
     and+ pp_config = pp_config t context ~expander
     and+ source_dirs =
       Action_builder.of_memo
@@ -1145,12 +1199,13 @@ module Unprocessed = struct
           let opens = Modules.With_vlib.local_open modules m in
           { Processed.opens; module_path; unit_name; sources } :: init)
     in
-    { Processed.Unindexed.config
-    ; modules = module_configs
-    ; pp_config
-    ; readers
-    ; for_ = t.config.for_
-    }
+    ( { Processed.Unindexed.config
+      ; modules = module_configs
+      ; pp_config
+      ; readers
+      ; for_ = t.config.for_
+      }
+    , indexes_digest )
   ;;
 end
 
@@ -1173,13 +1228,13 @@ let dot_merlin sctx ~dir ~more_src_dirs ~expander (default :: alternatives : gro
     in
     let+ default = process default
     and+ alternatives = List.map alternatives ~f:process |> Action_builder.all in
-    (default :: alternatives : Processed.Unindexed.t Nonempty_list.t)
+    (default :: alternatives : (Processed.Unindexed.t * Digest.t) Nonempty_list.t)
   in
   let action =
     configurations
-    |> Action_builder.map ~f:Processed.Persist.to_string
-    |> Action_builder.with_no_targets
-    |> Action_builder.With_targets.write_file_dyn merlin_file
+    |> Action_builder.map ~f:(fun configurations ->
+      Write.action configurations ~target:merlin_file |> Action.Full.make)
+    |> Action_builder.with_file_targets ~file_targets:[ merlin_file ]
   in
   Super_context.add_rule sctx ~dir action
 ;;
