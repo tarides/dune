@@ -188,8 +188,15 @@ module Make_load (Io : sig
     val readdir_with_kinds : Path.t -> (Filename.t * Unix.file_kind) list t
     val with_lexbuf_from_file : Path.t -> f:(Lexing.lexbuf -> 'a) -> 'a t
   end) : sig
-  val load : Path.t -> (t, User_message.t) result Io.t
-  val load_exn : Path.t -> t Io.t
+  (** [provided_packages] are the packages that may be depended on without
+      appearing in the lock directory because something outside it supplies
+      them. Always includes dune. *)
+  val load
+    :  Path.t
+    -> provided_packages:Package_name.Set.t
+    -> (t, User_message.t) result Io.t
+
+  val load_exn : Path.t -> provided_packages:Package_name.Set.t -> t Io.t
 end
 
 (** [transitive_dependency_closure t ~platform names] returns the set of package names

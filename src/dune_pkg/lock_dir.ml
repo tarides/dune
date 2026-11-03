@@ -1652,12 +1652,8 @@ struct
       package_name
   ;;
 
-  let check_packages packages ~lock_dir_path =
-    match
-      validate_packages
-        packages
-        ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
-    with
+  let check_packages packages ~lock_dir_path ~provided_packages =
+    match validate_packages packages ~provided_packages with
     | Ok () -> Ok ()
     | Error (`Missing_dependencies missing_dependencies) ->
       List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->
@@ -1690,7 +1686,7 @@ struct
            ])
   ;;
 
-  let load lock_dir_path =
+  let load lock_dir_path ~provided_packages =
     let event =
       Dune_trace.(
         Out.start (global ()) (fun () ->
@@ -1702,6 +1698,7 @@ struct
     in
     let { ocaml
         ; dependency_hash
+        ; parent_hash
         ; repos
         ; expanded_solver_variable_bindings
         ; solved_for_platforms
@@ -1737,11 +1734,11 @@ struct
       >>| Packages.of_pkg_list
     in
     let result =
-      check_packages packages ~lock_dir_path
+      check_packages packages ~lock_dir_path ~provided_packages
       |> Result.map ~f:(fun () ->
         { version
         ; dependency_hash
-        ; parent_hash = None
+        ; parent_hash
         ; packages
         ; ocaml
         ; repos
@@ -1753,9 +1750,9 @@ struct
     result
   ;;
 
-  let load_exn lock_dir_path =
+  let load_exn lock_dir_path ~provided_packages =
     let open Io.O in
-    load lock_dir_path >>| User_error.ok_exn
+    load lock_dir_path ~provided_packages >>| User_error.ok_exn
   ;;
 end
 
@@ -1773,8 +1770,15 @@ module Load_immediate = Make_load (struct
     let with_lexbuf_from_file = Io.with_lexbuf_from_file
   end)
 
-let read_disk = Load_immediate.load
-let read_disk_exn = Load_immediate.load_exn
+let read_disk path =
+  Load_immediate.load path ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
+;;
+
+let read_disk_exn path =
+  Load_immediate.load_exn
+    path
+    ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
+;;
 
 let transitive_dependency_closure t ~platform start =
   let missing_packages =
