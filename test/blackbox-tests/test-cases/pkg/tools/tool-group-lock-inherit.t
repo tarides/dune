@@ -93,12 +93,14 @@ needs a different version cannot be solved, even though the repository has it:
         bar.0.0.1: Incompatible with restriction: = 0.0.2
   [1]
 
-The delta records nothing about the parent it was solved against. After the
-parent moves to bar.0.0.2, a relocked group looks exactly the same, so nothing
-can tell a delta solved against the old parent from one solved against the new:
+The delta records a hash of the parent it was solved against. After the
+parent moves to bar.0.0.2, relocking the group changes the parent hash while
+the dependency hash stays the same, so a delta solved against the old parent
+can be told from one solved against the new:
 
   $ grep hash _build/.tools.locks/foo/lock.dune
   (dependency_hash 36e640fbcda71963e7e2f689f6c96c3e)
+  (parent_hash ce547daef521c61eb5a7f2f5d968599a)
   $ dune pkg lock
   Solution for dune.lock
   
@@ -112,3 +114,4 @@ can tell a delta solved against the old parent from one solved against the new:
   - foo.0.0.1
   $ grep hash _build/.tools.locks/foo/lock.dune
   (dependency_hash 36e640fbcda71963e7e2f689f6c96c3e)
+  (parent_hash b3cb660270027710370121f26585424d)

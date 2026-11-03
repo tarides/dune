@@ -1310,6 +1310,7 @@ let encode_metadata
 type metadata =
   { ocaml : (Loc.t * Package_name.t) option
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
+  ; parent_hash : Local_package.Dependency_hash.t option
   ; repos : Repositories.t
   ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
   ; solved_for_platforms : (Loc.t * Solver_env.t list) option
@@ -1321,6 +1322,7 @@ let decode_metadata =
     (let+ ocaml = field_o "ocaml" (located Package_name.decode)
      and+ dependency_hash =
        field_o "dependency_hash" (located Local_package.Dependency_hash.decode)
+     and+ parent_hash = field_o "parent_hash" Local_package.Dependency_hash.decode
      and+ repos = field "repositories" ~default:Repositories.default Repositories.decode
      and+ expanded_solver_variable_bindings =
        field
@@ -1332,6 +1334,7 @@ let decode_metadata =
      in
      { ocaml
      ; dependency_hash
+     ; parent_hash
      ; repos
      ; expanded_solver_variable_bindings
      ; solved_for_platforms
