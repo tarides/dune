@@ -45,12 +45,9 @@ Running the tool from the alt context builds it in alt's package pool and
 leaves the default pool untouched:
 
   $ dune exec --context alt foo
-  Error: Program 'foo' not found!
-  [1]
+  tool foo
   $ ls _build/_private/alt/.pkg | wc -l
-  ls: cannot access '_build/_private/alt/.pkg': No such file or directory
-  0
-  [2]
+  1
   $ ls _build/_private/default/.pkg | wc -l
   ls: cannot access '_build/_private/default/.pkg': No such file or directory
   0

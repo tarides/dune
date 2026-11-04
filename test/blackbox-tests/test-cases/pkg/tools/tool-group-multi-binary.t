@@ -36,11 +36,9 @@ the package. Every binary the package installs can be run by name.
 The binaries the locked tool provides can be run by name:
 
   $ dune exec alpha
-  Error: Program 'alpha' not found!
-  [1]
+  alpha
   $ dune exec beta
-  Error: Program 'beta' not found!
-  [1]
+  beta
 
 The package name is not a binary name. Running it is an ordinary not-found:
 

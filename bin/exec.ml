@@ -143,6 +143,32 @@ let build_prog ~no_rebuild ~prog p =
     p
 ;;
 
+(* Which binaries a tool installs is only known once it is built, so this
+   builds every locked tool group of the context. *)
+let tool_group_binary_path sctx ~prog =
+  let open Memo.O in
+  let ctx = Super_context.context sctx |> Context.name in
+  let+ binaries = Dune_rules.Pkg_rules.tool_group_binaries ctx in
+  match
+    List.filter binaries ~f:(fun (b : Dune_rules.Pkg_rules.Tool_group_binary.t) ->
+      String.equal (Filename.to_string b.name) prog)
+  with
+  | [] -> None
+  | [ b ] -> Some b.path
+  | providers ->
+    User_error.raise
+      [ Pp.textf
+          "Binary %S is provided by several tools: %s."
+          prog
+          (List.map providers ~f:(fun (b : Dune_rules.Pkg_rules.Tool_group_binary.t) ->
+             sprintf
+               "%s (group %s)"
+               (Package.Name.to_string b.tool)
+               (Workspace.Tool_group.name b.group))
+           |> String.concat ~sep:", ")
+      ]
+;;
+
 let dir_of_context common sctx =
   let context = Dune_rules.Super_context.context sctx in
   Path.Build.relative (Context.build_dir context) (Common.prefix_target common "")
@@ -159,8 +185,18 @@ let get_path common sctx ~prog =
   | In_path ->
     Super_context.resolve_program_memo sctx ~dir ~loc:None prog
     >>= (function
-     | Error (_ : Action.Prog.Not_found.t) -> not_found_with_suggestions ~dir ~prog
-     | Ok p -> Memo.return p)
+     | Ok p when Path.is_in_build_dir p ->
+       (* an executable of the project or a binary of its dependencies *)
+       Memo.return p
+     | resolved ->
+       (* tools win over programs found on PATH *)
+       tool_group_binary_path sctx ~prog
+       >>= (function
+        | Some p -> Memo.return p
+        | None ->
+          (match resolved with
+           | Ok p -> Memo.return p
+           | Error (_ : Action.Prog.Not_found.t) -> not_found_with_suggestions ~dir ~prog)))
   | Relative_to_current_dir ->
     let path = Path.relative_to_source_in_build_or_external ~dir prog in
     Build_system.file_exists path

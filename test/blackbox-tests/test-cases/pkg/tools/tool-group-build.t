@@ -45,16 +45,13 @@ The group's lock dir is copied into the context:
 Run the tool. It is built on demand together with its dependency:
 
   $ dune exec foo
-  Error: Program 'foo' not found!
-  [1]
+  hello from foo
 
 Both packages were built in the default context's package pool, and no
 project lock directory was created:
 
   $ ls _build/_private/default/.pkg | wc -l
-  ls: cannot access '_build/_private/default/.pkg': No such file or directory
-  0
-  [2]
+  2
   $ ls dune.lock
   ls: cannot access 'dune.lock': No such file or directory
   [2]

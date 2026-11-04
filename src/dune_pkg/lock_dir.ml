@@ -560,6 +560,12 @@ let in_source_tree path =
             Path.build_dir |> Path.to_string |> Path.Source.of_string
           in
           Path.Source.L.relative build_as_source (prefix :: dev_tool :: components)
+        | prefix :: tool_group :: components
+          when String.equal prefix Workspace.tools_lock_dir_name ->
+          let build_as_source =
+            Path.build_dir |> Path.to_string |> Path.Source.of_string
+          in
+          Path.Source.L.relative build_as_source (prefix :: tool_group :: components)
         | build_components ->
           Code_error.raise
             "Unexpected location of lock directory in build directory"

@@ -50,5 +50,4 @@ Lock the group:
 Build and run the tool. The source is fetched and checked on the way:
 
   $ dune exec foo 2>&1 | sed "s/$checksum/CHECKSUM/g"
-  Error: Program 'foo' not found!
-  [1]
+  tool foo

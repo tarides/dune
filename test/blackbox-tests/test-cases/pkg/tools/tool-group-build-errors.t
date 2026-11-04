@@ -1,5 +1,6 @@
 Error cases when building a locked tool group. Each scenario uses its own
-group so that they do not interfere.
+group, which is unlocked again once the scenario is done: "dune exec"
+searches every locked group, so a failing one would mask the next scenario.
 
   $ mkrepo
   $ mkpkg buildfail 1.0.0 <<EOF
@@ -64,8 +65,14 @@ The build command of the tool's package fails:
   - buildfail.1.0.0
 
   $ dune exec buildfail
-  Error: Program 'buildfail' not found!
+  something went wrong
+  File "_build/.tools.locks/buildfail/buildfail.1.0.0.pkg", line 4, characters 30-32:
+  4 |  (all_platforms ((action (run sh -c "echo something went wrong; exit 1")))))
+                                    ^^
+  Error: Logs for package buildfail
+  
   [1]
+  $ rm -rf _build/.tools.locks/buildfail
 
 The tool's package builds but installs no binary at all:
 
@@ -78,6 +85,7 @@ The tool's package builds but installs no binary at all:
   $ dune exec nobin
   Error: Program 'nobin' not found!
   [1]
+  $ rm -rf _build/.tools.locks/nobin
 
 The build command of one of the tool's dependencies fails:
 
@@ -89,8 +97,14 @@ The build command of one of the tool's dependencies fails:
   - depfail.1.0.0
 
   $ dune exec depfail
-  Error: Program 'depfail' not found!
+  dependency broke
+  File "_build/.tools.locks/depfail/badbar.1.0.0.pkg", line 4, characters 30-32:
+  4 |  (all_platforms ((action (run sh -c "echo dependency broke; exit 1")))))
+                                    ^^
+  Error: Logs for package badbar
+  
   [1]
+  $ rm -rf _build/.tools.locks/depfail
 
 The fetched source of the tool does not match the checksum recorded in the
 lock directory:
@@ -103,8 +117,13 @@ lock directory:
 
   $ actual=$(md5sum badcheck.tar | cut -f1 -d' ')
   $ dune exec badcheck 2>&1 | sed "s/$actual/ACTUAL/g"
-  Error: Program 'badcheck' not found!
+  File "_build/.tools.locks/badcheck/badcheck.1.0.0.pkg", line 10, characters 12-48:
+  10 |   (checksum md5=00000000000000000000000000000000)))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Invalid checksum, got
+  md5=ACTUAL
   [1]
+  $ rm -rf _build/.tools.locks/badcheck
 
 The lockfile of the tool's package was deleted from the lock directory:
 
@@ -116,8 +135,13 @@ The lockfile of the tool's package was deleted from the lock directory:
 
   $ rm _build/.tools.locks/tampered/tampered.1.0.0.pkg
   $ dune exec tampered
-  Error: Program 'tampered' not found!
+  File "dune-workspace", line 10, characters 19-27:
+  10 | (tool_group (tools tampered) (lock_dir (repositories mock)))
+                          ^^^^^^^^
+  Error: The lock directory of tool group "tampered" does not contain a
+  lockfile for tool "tampered". It may have been modified.
   [1]
+  $ rm -rf _build/.tools.locks/tampered
 
 The lock.dune of the group's lock directory is corrupted:
 
@@ -129,5 +153,8 @@ The lock.dune of the group's lock directory is corrupted:
 
   $ echo garbage > _build/.tools.locks/corrupt/lock.dune
   $ dune exec corrupt
-  Error: Program 'corrupt' not found!
+  File "$TESTCASE_ROOT/_build/.tools.locks/corrupt/lock.dune", line 1, characters 0-7:
+  1 | garbage
+      ^^^^^^^
+  Error: Invalid first line, expected: (lang <lang> <version>)
   [1]

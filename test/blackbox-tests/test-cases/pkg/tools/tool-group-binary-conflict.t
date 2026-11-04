@@ -51,5 +51,6 @@ Both groups are locked and both provide a binary named "clash". Requesting
 that name reports the conflict instead of picking one:
 
   $ dune exec clash
-  Error: Program 'clash' not found!
+  Error: Binary "clash" is provided by several tools: toola (group toola),
+  toolb (group toolb).
   [1]
