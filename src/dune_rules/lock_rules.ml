@@ -432,7 +432,16 @@ let setup_dev_tool_lock_rules ~dir dev_tool =
   setup_copy_rules ~dir ~lock_dir
 ;;
 
-let setup_rules ~components ~dir =
+let setup_tool_group_lock_rules ~dir tool_group =
+  let name = Workspace.Tool_group.name tool_group in
+  let dir = Path.Build.relative dir name in
+  let lock_dir =
+    Path.Outside_build_dir.External (tool_group |> Lock_dir.tool_external_lock_dir)
+  in
+  setup_copy_rules ~dir ~lock_dir
+;;
+
+let setup_rules ~components ~dir ~ctx =
   let empty = Gen_rules.rules_here Gen_rules.Rules.empty in
   match components with
   | [ ".lock" ] ->
@@ -448,8 +457,18 @@ let setup_rules ~components ~dir =
     Memo.List.fold_left Dev_tool.all ~init:empty ~f:(fun rules dev_tool ->
       let+ dev_tool_rules = setup_dev_tool_lock_rules ~dir dev_tool in
       Gen_rules.combine rules dev_tool_rules)
+  | [ ".tool-locks" ] ->
+    let* groups = Lock_dir.tool_groups_of_context ctx in
+    Memo.List.fold_left groups ~init:empty ~f:(fun rules group ->
+      let+ tool_rules = setup_tool_group_lock_rules ~dir group in
+      Gen_rules.combine rules tool_rules)
   | [] ->
-    let sub_dirs = [ Filename.lock_dir_basename; Filename.dev_tool_locks_dir_basename ] in
+    let sub_dirs =
+      [ Filename.lock_dir_basename
+      ; Filename.dev_tool_locks_dir_basename
+      ; Filename.tools_lock_dir_basename
+      ]
+    in
     let build_dir_only_sub_dirs =
       Gen_rules.Build_only_sub_dirs.singleton ~dir @@ Subdir_set.of_list sub_dirs
     in

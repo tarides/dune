@@ -30,6 +30,21 @@ val tool_external_lock_dir : Workspace.Tool_group.t -> Path.External.t
     given dev tool *)
 val dev_tool_lock_dir : Dune_pkg.Dev_tool.t -> Path.t
 
+(** The tracked copy of a tool group's lock dir in the given context, which
+    is what rules read. *)
+val tool_group_lock_dir : Context_name.t -> Workspace.Tool_group.t -> Path.t
+
+(** Whether [dune tools lock] has written the group's lock dir. Untracked:
+    the lock dir is written outside the build system, possibly mid-session. *)
+val tool_group_locked : Workspace.Tool_group.t -> bool
+
+(** The tool groups whose packages build in the given context. *)
+val tool_groups_of_context : Context_name.t -> Workspace.Tool_group.t list Memo.t
+
+(** Loads a tool group's lock dir for the given context. User error if the
+    group is not locked. *)
+val of_tool_group : Context_name.t -> Workspace.Tool_group.t -> t Memo.t
+
 val select_lock_dir : Workspace.Lock_dir_selection.t -> Path.Source.t Memo.t
 
 (** Returns the lock directories present in the given workspace. *)

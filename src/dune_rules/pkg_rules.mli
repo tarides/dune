@@ -59,3 +59,16 @@ val pkg_digest_of_project_dependency
   :  Context_name.t
   -> Package.Name.t
   -> Pkg_digest.t option Memo.t
+
+module Tool_group_binary : sig
+  type t =
+    { group : Workspace.Tool_group.t
+    ; tool : Package.Name.t
+    ; name : Filename.t
+    ; path : Path.t
+    }
+end
+
+(** Binaries installed by the tools of every locked tool group of the
+    context. Computing the list builds the tools. *)
+val tool_group_binaries : Context_name.t -> Tool_group_binary.t list Memo.t

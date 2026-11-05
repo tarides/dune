@@ -49,6 +49,7 @@ module Tool_group : sig
     }
 
   val equal : t -> t -> bool
+  val hash : t -> int
   val to_dyn : t -> Dyn.t
 
   (** The group's [name] field, or the name of its only tool when the field is
