@@ -2621,6 +2621,7 @@ let solve_lock_dir
               pkgs_by_name
               ~local_packages:(Package_name.Map.values local_packages)
               ~provided_packages:provided_package_names
+              ~parent_packages
               ~ocaml
               ~repos:(Some repos)
               ~expanded_solver_variable_bindings

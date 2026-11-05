@@ -55,6 +55,10 @@ module Dependency_hash : sig
   val to_string : t -> string
   val encode : t Encoder.t
   val decode : t Decoder.t
+
+  (** Hash of the printed representation of a value. *)
+  val of_dyn : Dyn.t -> t
+
   val of_dependency_formula : Dependency_formula.t -> t option
 end
 

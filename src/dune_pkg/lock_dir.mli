@@ -108,6 +108,10 @@ end
 type t = private
   { version : Syntax.Version.t
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
+  ; parent_hash : Local_package.Dependency_hash.t option
+    (** Hash of the inherited context's packages this lock directory was
+        solved against. Only present in the lock directory of an inheriting
+        tool group. *)
   ; packages : Packages.t
     (** It's guaranteed that this map will contain an entry for all dependencies
       of all packages in this map. That is, the set of packages is closed under
@@ -130,6 +134,15 @@ val to_dyn : t -> Dyn.t
     handle multiple versions of the same package. *)
 val uses_versioned_paths : t -> bool
 
+(** Hash of the names and versions of [packages], the packages of an
+    inherited context. The same packages give the same hash. *)
+val parent_hash_of_packages : Pkg.t Package_name.Map.t -> Local_package.Dependency_hash.t
+
+(** Whether a delta lock dir was solved against [parent]. [`Valid] when [t]
+    is not a delta or the hash of [parent] matches the one recorded in [t];
+    [`Stale] when the parent's packages have changed since. *)
+val up_to_date : t -> parent:Pkg.t Package_name.Map.t -> [ `Valid | `Stale ]
+
 (** [create_latest_version packages ~ocaml ~repos
     ~expanded_solver_variable_bindings] raises a [Code_error] if [packages] is
     not closed under the "depends on" relationship between packages. Every
@@ -142,6 +155,9 @@ val create_latest_version
        (** Packages that may be depended on without appearing in [packages]
            because something outside this lock directory supplies them. Always
            includes dune. *)
+  -> parent_packages:Pkg.t Package_name.Map.t
+       (** Packages of the inherited context this lock directory was solved
+           against. Empty unless locking an inheriting tool group. *)
   -> ocaml:(Loc.t * Package_name.t) option
   -> repos:Opam_repo.t list option
   -> expanded_solver_variable_bindings:Solver_stats.Expanded_variable_bindings.t
@@ -167,8 +183,15 @@ module Write_disk : sig
   val commit : t -> unit
 end
 
-val read_disk : Path.t -> (t, User_message.t) result
-val read_disk_exn : Path.t -> t
+(** [provided_packages] are the packages that may be depended on without
+    appearing in the lock directory because something outside it supplies
+    them. Always includes dune. *)
+val read_disk
+  :  Path.t
+  -> provided_packages:Package_name.Set.t
+  -> (t, User_message.t) result
+
+val read_disk_exn : Path.t -> provided_packages:Package_name.Set.t -> t
 
 module Make_load (Io : sig
     include Monad.S
@@ -177,8 +200,12 @@ module Make_load (Io : sig
     val readdir_with_kinds : Path.t -> (Filename.t * Unix.file_kind) list t
     val with_lexbuf_from_file : Path.t -> f:(Lexing.lexbuf -> 'a) -> 'a t
   end) : sig
-  val load : Path.t -> (t, User_message.t) result Io.t
-  val load_exn : Path.t -> t Io.t
+  val load
+    :  Path.t
+    -> provided_packages:Package_name.Set.t
+    -> (t, User_message.t) result Io.t
+
+  val load_exn : Path.t -> provided_packages:Package_name.Set.t -> t Io.t
 end
 
 (** [transitive_dependency_closure t ~platform names] returns the set of package names

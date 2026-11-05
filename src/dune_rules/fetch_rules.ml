@@ -181,6 +181,12 @@ let find_checksum, find_url =
             | false -> Memo.return acc
             | true -> Lock_dir.of_dev_tool dev_tool >>| add_checksums_and_urls acc)
       in
+      let* init =
+        Lock_dir.tool_groups_of_context Context_name.default
+        >>| List.filter ~f:Lock_dir.tool_group_locked
+        >>= Memo.List.fold_left ~init ~f:(fun acc group ->
+          Lock_dir.of_tool_group Context_name.default group >>| add_checksums_and_urls acc)
+      in
       Per_context.list ()
       >>= Memo.parallel_map ~f:(fun ctx_name ->
         let* active = Lock_dir.lock_dir_active ctx_name in

@@ -1058,6 +1058,7 @@ end
 type t =
   { version : Syntax.Version.t
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
+  ; parent_hash : Local_package.Dependency_hash.t option
   ; packages : Packages.t
   ; ocaml : (Loc.t * Package_name.t) option
   ; repos : Repositories.t
@@ -1075,6 +1076,7 @@ let remove_locs t =
 let equal
       { version
       ; dependency_hash
+      ; parent_hash
       ; packages
       ; ocaml
       ; repos
@@ -1088,6 +1090,7 @@ let equal
        (Tuple.T2.equal Loc.equal Local_package.Dependency_hash.equal)
        dependency_hash
        t.dependency_hash
+  && Option.equal Local_package.Dependency_hash.equal parent_hash t.parent_hash
   && Option.equal (Tuple.T2.equal Loc.equal Package_name.equal) ocaml t.ocaml
   && Repositories.equal repos t.repos
   && Packages.equal packages t.packages
@@ -1102,6 +1105,7 @@ let equal
 let to_dyn
       { version
       ; dependency_hash
+      ; parent_hash
       ; packages
       ; ocaml
       ; repos
@@ -1115,6 +1119,7 @@ let to_dyn
       , Dyn.option
           (Tuple.T2.to_dyn Loc.to_dyn_hum Local_package.Dependency_hash.to_dyn)
           dependency_hash )
+    ; "parent_hash", Dyn.option Local_package.Dependency_hash.to_dyn parent_hash
     ; "packages", Packages.to_dyn packages
     ; "ocaml", Dyn.option (Tuple.T2.to_dyn Loc.to_dyn_hum Package_name.to_dyn) ocaml
     ; "repos", Repositories.to_dyn repos
@@ -1158,10 +1163,29 @@ let validate_packages packages ~provided_packages =
   else Error (`Missing_dependencies missing_dependencies)
 ;;
 
+let parent_hash_of_packages (parent : Pkg.t Package_name.Map.t) =
+  Package_name.Map.to_list_map parent ~f:(fun name (pkg : Pkg.t) ->
+    name, pkg.info.version)
+  |> Dyn.list (Dyn.pair Package_name.to_dyn Package_version.to_dyn)
+  |> Local_package.Dependency_hash.of_dyn
+;;
+
+let up_to_date (t : t) ~parent =
+  match t.parent_hash with
+  | None -> `Valid
+  | Some stored ->
+    (match
+       Local_package.Dependency_hash.equal stored (parent_hash_of_packages parent)
+     with
+     | true -> `Valid
+     | false -> `Stale)
+;;
+
 let create_latest_version
       packages
       ~local_packages
       ~provided_packages
+      ~parent_packages
       ~ocaml
       ~repos
       ~expanded_solver_variable_bindings
@@ -1209,8 +1233,14 @@ let create_latest_version
       Solver_stats.Expanded_variable_bindings.remove_platform_specific
         expanded_solver_variable_bindings
   in
+  let parent_hash =
+    match Package_name.Map.is_empty parent_packages with
+    | true -> None
+    | false -> Some (parent_hash_of_packages parent_packages)
+  in
   { version
   ; dependency_hash
+  ; parent_hash
   ; packages
   ; ocaml
   ; repos = { complete; used }
@@ -1229,6 +1259,7 @@ let encode_metadata
       ~portable_lock_dir
       { version
       ; dependency_hash
+      ; parent_hash
       ; ocaml
       ; repos
       ; packages = _
@@ -1255,6 +1286,13 @@ let encode_metadata
            ; Local_package.Dependency_hash.encode dependency_hash
            ]
        ])
+  @ (match parent_hash with
+     | None -> []
+     | Some parent_hash ->
+       [ list
+           sexp
+           [ string "parent_hash"; Local_package.Dependency_hash.encode parent_hash ]
+       ])
   @ (match ocaml with
      | None -> []
      | Some ocaml -> [ list sexp [ string "ocaml"; Package_name.encode (snd ocaml) ] ])
@@ -1280,12 +1318,22 @@ let encode_metadata
   else []
 ;;
 
+type metadata =
+  { ocaml : (Loc.t * Package_name.t) option
+  ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
+  ; parent_hash : Local_package.Dependency_hash.t option
+  ; repos : Repositories.t
+  ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
+  ; solved_for_platforms : (Loc.t * Solver_env.t list) option
+  }
+
 let decode_metadata =
   let open Decoder in
   fields
     (let+ ocaml = field_o "ocaml" (located Package_name.decode)
      and+ dependency_hash =
        field_o "dependency_hash" (located Local_package.Dependency_hash.decode)
+     and+ parent_hash = field_o "parent_hash" Local_package.Dependency_hash.decode
      and+ repos = field "repositories" ~default:Repositories.default Repositories.decode
      and+ expanded_solver_variable_bindings =
        field
@@ -1295,11 +1343,13 @@ let decode_metadata =
      and+ solved_for_platforms =
        field_o "solved_for_platforms" (located (repeat (enter Solver_env.decode)))
      in
-     ( ocaml
-     , dependency_hash
-     , repos
-     , expanded_solver_variable_bindings
-     , solved_for_platforms ))
+     { ocaml
+     ; dependency_hash
+     ; parent_hash
+     ; repos
+     ; expanded_solver_variable_bindings
+     ; solved_for_platforms
+     })
 ;;
 
 module Package_filename = struct
@@ -1561,43 +1611,17 @@ module Make_load (Io : sig
 struct
   let load_metadata metadata_file_path =
     let open Io.O in
-    let+ ( syntax
-         , version
-         , dependency_hash
-         , ocaml
-         , repos
-         , expanded_solver_variable_bindings
-         , solved_for_platforms )
-      =
+    let+ syntax, version, metadata =
       Io.with_lexbuf_from_file metadata_file_path ~f:(fun lexbuf ->
         Metadata.parse_contents
           lexbuf
           ~f:(fun { Metadata.Lang.Instance.syntax; data = (); version } ->
             let open Decoder in
-            let+ ( ocaml
-                 , dependency_hash
-                 , repos
-                 , expanded_solver_variable_bindings
-                 , solved_for_platforms )
-              =
-              decode_metadata
-            in
-            ( syntax
-            , version
-            , dependency_hash
-            , ocaml
-            , repos
-            , expanded_solver_variable_bindings
-            , solved_for_platforms )))
+            let+ metadata = decode_metadata in
+            syntax, version, metadata))
     in
     if Syntax.Name.equal (Syntax.name syntax) (Syntax.name Dune_lang.Pkg.syntax)
-    then
-      ( version
-      , dependency_hash
-      , ocaml
-      , repos
-      , expanded_solver_variable_bindings
-      , solved_for_platforms )
+    then version, metadata
     else
       User_error.raise
         [ Pp.textf
@@ -1639,12 +1663,8 @@ struct
       package_name
   ;;
 
-  let check_packages packages ~lock_dir_path =
-    match
-      validate_packages
-        packages
-        ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
-    with
+  let check_packages packages ~lock_dir_path ~provided_packages =
+    match validate_packages packages ~provided_packages with
     | Ok () -> Ok ()
     | Error (`Missing_dependencies missing_dependencies) ->
       List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->
@@ -1677,21 +1697,25 @@ struct
            ])
   ;;
 
-  let load lock_dir_path =
+  let load lock_dir_path ~provided_packages =
     let event =
       Dune_trace.(
         Out.start (global ()) (fun () ->
           Event.Async.pkg_load_lock_dir ~path:(Path.to_string lock_dir_path)))
     in
     let open Io.O in
-    let* ( version
-         , dependency_hash
-         , ocaml
-         , repos
-         , expanded_solver_variable_bindings
-         , solved_for_platforms )
-      =
+    let* version, metadata =
       load_metadata (Path.relative_fname lock_dir_path metadata_filename)
+    in
+    let { ocaml
+        ; dependency_hash
+        ; parent_hash
+        ; repos
+        ; expanded_solver_variable_bindings
+        ; solved_for_platforms
+        }
+      =
+      metadata
     in
     let portable_lock_dir, solved_for_platforms =
       match solved_for_platforms with
@@ -1721,10 +1745,11 @@ struct
       >>| Packages.of_pkg_list
     in
     let result =
-      check_packages packages ~lock_dir_path
+      check_packages packages ~lock_dir_path ~provided_packages
       |> Result.map ~f:(fun () ->
         { version
         ; dependency_hash
+        ; parent_hash
         ; packages
         ; ocaml
         ; repos
@@ -1736,9 +1761,9 @@ struct
     result
   ;;
 
-  let load_exn lock_dir_path =
+  let load_exn lock_dir_path ~provided_packages =
     let open Io.O in
-    load lock_dir_path >>| User_error.ok_exn
+    load lock_dir_path ~provided_packages >>| User_error.ok_exn
   ;;
 end
 
@@ -1819,7 +1844,7 @@ let loc_in_source_tree loc =
     { pos with pos_fname })
 ;;
 
-let check_if_solved_for_platform { solved_for_platforms; _ } ~platform =
+let check_if_solved_for_platform ({ solved_for_platforms; _ } : t) ~platform =
   let loc, solved_for_platforms = solved_for_platforms in
   if List.is_empty solved_for_platforms
   then

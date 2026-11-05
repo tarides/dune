@@ -145,6 +145,7 @@ val ocamlfind : t
 val opam : t
 val ppx_dir_basename : t
 val pkg_dir_basename : t
+val tools_lock_dir_basename : t
 val rocq : t
 val run_t : t
 val template : t

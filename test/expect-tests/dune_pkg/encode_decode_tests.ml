@@ -69,7 +69,7 @@ let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
     prepare ~portable_lock_dir:false ~lock_dir_path ~files:Package_name.Map.empty lock_dir
     |> commit);
   let lock_dir_round_tripped =
-    try Lock_dir.read_disk_exn lock_dir_path with
+    try Lock_dir.read_disk_exn lock_dir_path ~provided_packages with
     | User_error.E _ as exn ->
       let metadata_path = Path.relative_fname lock_dir_path Lock_dir.metadata_filename in
       let metadata_file_contents = Io.read_file_exn metadata_path in
@@ -110,6 +110,7 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
          Package_name.Map.empty
          ~local_packages:[]
          ~provided_packages
+         ~parent_packages:Package_name.Map.empty
          ~ocaml:None
          ~repos:None
          ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
@@ -121,6 +122,7 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
     lockdir matches after roundtrip:
     { version = (0, 1)
     ; dependency_hash = None
+    ; parent_hash = None
     ; packages = map {}
     ; ocaml = None
     ; repos = { complete = true; used = None }
@@ -160,6 +162,7 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
        Lock_dir.create_latest_version
          ~local_packages:[]
          ~provided_packages
+         ~parent_packages:Package_name.Map.empty
          ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
          ~repos:None
          ~expanded_solver_variable_bindings:
@@ -179,6 +182,7 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
     lockdir matches after roundtrip:
     { version = (0, 1)
     ; dependency_hash = None
+    ; parent_hash = None
     ; packages =
         map
           { "bar" :
@@ -327,6 +331,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
     Lock_dir.create_latest_version
       ~local_packages:[]
       ~provided_packages
+      ~parent_packages:Package_name.Map.empty
       ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
       ~repos:(Some [ opam_repo ])
       ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
@@ -340,6 +345,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
     lockdir matches after roundtrip:
     { version = (0, 1)
     ; dependency_hash = None
+    ; parent_hash = None
     ; packages =
         map
           { "a" :
@@ -476,6 +482,7 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
       Lock_dir.create_latest_version
         ~local_packages:[]
         ~provided_packages
+        ~parent_packages:Package_name.Map.empty
         ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
         ~repos:(Some [ opam_repo ])
         ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
@@ -493,6 +500,7 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
     lockdir matches after roundtrip:
     { version = (0, 1)
     ; dependency_hash = None
+    ; parent_hash = None
     ; packages =
         map
           { "a" :
@@ -567,4 +575,89 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
     ; solved_for_platforms = ("<none>:1", [])
     }
     |}]
+;;
+
+let%expect_test "a lock dir may depend on packages provided from outside it" =
+  let lock_dir_path = Path.of_string "delta_lock_dir" in
+  let bar = Package_name.of_string "bar" in
+  let foo =
+    let name = Package_name.of_string "foo" in
+    let pkg = empty_package name ~version:(Package_version.of_string "0.1.0") in
+    ( name
+    , { pkg with
+        depends =
+          Lock_dir.Conditional_choice.singleton
+            Dune_pkg.Solver_env.empty
+            [ { Dependency.loc = Loc.none; name = bar } ]
+      } )
+  in
+  let provided_with_bar = Package_name.Set.add provided_packages bar in
+  Lock_dir.Write_disk.(
+    prepare
+      ~portable_lock_dir:false
+      ~lock_dir_path
+      ~files:Package_name.Map.empty
+      (Lock_dir.create_latest_version
+         (Package_name.Map.singleton (fst foo) (snd foo))
+         ~local_packages:[]
+         ~provided_packages:provided_with_bar
+         ~parent_packages:Package_name.Map.empty
+         ~ocaml:None
+         ~repos:None
+         ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
+         ~solved_for_platforms:[]
+         ~portable_lock_dir:false)
+    |> commit);
+  let load provided_packages =
+    match Lock_dir.read_disk lock_dir_path ~provided_packages with
+    | Ok _ -> print_endline "loaded"
+    | Error msg -> print_endline (User_message.to_string msg)
+  in
+  load provided_with_bar;
+  [%expect {| loaded |}];
+  load provided_packages;
+  [%expect
+    {|
+    File "delta_lock_dir/foo.pkg", line 3, characters 9-12:
+    The package "foo" depends on the package "bar", but "bar" does not appear in
+    the lockdir delta_lock_dir.
+    At least one package dependency is itself not present as a package in
+    the lockdir delta_lock_dir.
+    Hint: This could indicate that the lockdir is corrupted. Delete it and then
+    regenerate it by running: 'dune pkg lock'
+    |}]
+;;
+
+let%expect_test "a delta is up to date only against the parent it was solved for" =
+  let parent version =
+    let name = Package_name.of_string "bar" in
+    Package_name.Map.singleton
+      name
+      (empty_package name ~version:(Package_version.of_string version))
+  in
+  let lock_dir ~parent_packages =
+    Lock_dir.create_latest_version
+      Package_name.Map.empty
+      ~local_packages:[]
+      ~provided_packages
+      ~parent_packages
+      ~ocaml:None
+      ~repos:None
+      ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
+      ~solved_for_platforms:[]
+      ~portable_lock_dir:false
+  in
+  let check t ~parent =
+    print_endline
+      (match Lock_dir.up_to_date t ~parent with
+       | `Valid -> "valid"
+       | `Stale -> "stale")
+  in
+  let delta = lock_dir ~parent_packages:(parent "0.0.1") in
+  check delta ~parent:(parent "0.0.1");
+  [%expect {| valid |}];
+  check delta ~parent:(parent "0.0.2");
+  [%expect {| stale |}];
+  check (lock_dir ~parent_packages:Package_name.Map.empty) ~parent:(parent "0.0.2");
+  [%expect {| valid |}]
 ;;

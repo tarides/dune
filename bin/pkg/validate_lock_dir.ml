@@ -23,7 +23,11 @@ let enumerate_lock_dirs_by_path ~lock_dirs () =
   List.filter_map per_contexts ~f:(fun lock_dir_path ->
     if Fpath.exists (Path.Source.to_string lock_dir_path)
     then (
-      match Lock_dir.read_disk_exn (Path.source lock_dir_path) with
+      match
+        Lock_dir.read_disk_exn
+          (Path.source lock_dir_path)
+          ~provided_packages:(Package_name.Set.singleton Dune_pkg.Dune_dep.name)
+      with
       | lock_dir -> Some (Ok (lock_dir_path, lock_dir))
       | exception User_error.E e -> Some (Error (lock_dir_path, `Parse_error e)))
     else None)

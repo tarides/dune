@@ -185,6 +185,48 @@ let dev_tool_lock_dir dev_tool =
   Path.build lock_dir
 ;;
 
+let tool_group_lock_dir ctx (group : Workspace.Tool_group.t) =
+  let lock_dir =
+    Path.Build.L.relative
+      Private_context.t.build_dir
+      [ Context_name.to_string ctx
+      ; Filename.tools_lock_dir_basename |> Filename.to_string
+      ]
+  in
+  let segment = Workspace.Tool_group.name group |> Path.Local.of_string in
+  Path.Build.append_local lock_dir segment |> Path.build
+;;
+
+let tool_group_locked group =
+  tool_external_lock_dir group |> Path.external_ |> Path.to_string |> Fpath.exists
+;;
+
+let tool_groups_of_context ctx =
+  let+ workspace = Workspace.workspace () in
+  List.filter workspace.tool_groups ~f:(fun (group : Workspace.Tool_group.t) ->
+    match group.lock_dir with
+    | Lock_dir _ -> true
+    | Inherit _ ->
+      ignore ctx;
+      false)
+;;
+
+(* Get the tool group's lock dir *)
+let of_tool_group ctx group =
+  match tool_group_locked group with
+  | false ->
+    let name = Workspace.Tool_group.name group in
+    User_error.raise
+      ~loc:group.loc
+      [ Pp.textf "Tool group %S is not locked." name ]
+      ~hints:[ Pp.textf "Run 'dune tools lock %s'" name ]
+  | true ->
+    let* () = Build_system.build_dir (tool_group_lock_dir ctx group) in
+    Load.load_exn
+      (tool_external_lock_dir group |> Path.external_)
+      ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
+;;
+
 let lock_dir_of_source p =
   let local = Path.Source.to_local p in
   Path.Build.append_local path_prefix local |> Path.build
@@ -229,7 +271,7 @@ let get_with_path =
          ~input:(module Path)
          (fun path ->
             let* () = Build_system.build_dir path in
-            Load.load path))
+            Load.load path ~provided_packages:(Package_name.Set.singleton Dune_dep.name)))
   in
   Per_context.create_by_name ~name:"lock-dir-get" (fun ctx ->
     Memo.lazy_ ~name:"lock-dir-get" (fun () ->
@@ -265,7 +307,7 @@ let of_dev_tool dev_tool =
   let path = dev_tool |> dev_tool_external_lock_dir |> Path.external_ in
   (* Ensure the internal lock dir is built so copy rules run *)
   let* () = Build_system.build_dir (dev_tool_lock_dir dev_tool) in
-  Load.load_exn path
+  Load.load_exn path ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
 ;;
 
 let of_dev_tool_if_lock_dir_exists dev_tool =
@@ -277,7 +319,9 @@ let of_dev_tool_if_lock_dir_exists dev_tool =
   in
   if exists
   then
-    let+ t = Load.load_exn path in
+    let+ t =
+      Load.load_exn path ~provided_packages:(Package_name.Set.singleton Dune_dep.name)
+    in
     Some t
   else Memo.return None
 ;;
