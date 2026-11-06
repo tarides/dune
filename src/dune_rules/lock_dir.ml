@@ -160,6 +160,17 @@ let dev_tool_external_lock_dir dev_tool =
   Path.External.append_local dev_tools_path dev_tool_segment
 ;;
 
+let tool_external_lock_dir (tool : Workspace.Tool_group.t) =
+  let external_root =
+    Path.Build.root |> Path.build |> Path.to_absolute_filename |> Path.External.of_string
+  in
+  let tools_path =
+    Path.External.relative external_root Dune_pkg.Pkg_workspace.tools_lock_dir_name
+  in
+  let tool_segment = Workspace.Tool_group.name tool |> Path.Local.of_string in
+  Path.External.append_local tools_path tool_segment
+;;
+
 (* This function returns the lock dir location where the build system can create
    the lock directory. This is where lock files should be loaded from and it
    is populated either by copy rules or the solver running. *)

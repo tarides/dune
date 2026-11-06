@@ -138,6 +138,10 @@ val uses_versioned_paths : t -> bool
 val create_latest_version
   :  Pkg.t Package_name.Map.t
   -> local_packages:Local_package.For_solver.t list
+  -> provided_packages:Package_name.Set.t
+       (** Packages that may be depended on without appearing in [packages]
+           because something outside this lock directory supplies them. Always
+           includes dune. *)
   -> ocaml:(Loc.t * Package_name.t) option
   -> repos:Opam_repo.t list option
   -> expanded_solver_variable_bindings:Solver_stats.Expanded_variable_bindings.t
