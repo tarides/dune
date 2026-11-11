@@ -115,7 +115,26 @@ shared_packages only exists under inherit, not under lock_dir:
   Error: Unknown field "shared_packages"
   [1]
 
-The same tool may be declared once per context:
+The same tool may be declared once per context. Each group still needs its
+own name, so all but one of them must be named explicitly:
+
+  $ cat > dune-workspace <<EOF
+  > (lang dune 3.25)
+  > (using unreleased 0.1)
+  > (context default)
+  > (context (default (name other)))
+  > (tool_group
+  >  (tools ocaml-lsp-server)
+  >  (inherit (context default)))
+  > (tool_group
+  >  (name lsp-other)
+  >  (tools ocaml-lsp-server)
+  >  (inherit (context other)))
+  > EOF
+  $ dune build
+
+A group without a name is named after its tool, so two anonymous groups
+declaring the same tool collide even in different contexts:
 
   $ cat > dune-workspace <<EOF
   > (lang dune 3.25)
@@ -130,6 +149,16 @@ The same tool may be declared once per context:
   >  (inherit (context other)))
   > EOF
   $ dune build
+  File "dune-workspace", lines 8-10, characters 0-65:
+   8 | (tool_group
+   9 |  (tools ocaml-lsp-server)
+  10 |  (inherit (context other)))
+  Error: Tool group "ocaml-lsp-server" is declared multiple times:
+  - dune-workspace:5
+  - dune-workspace:8
+  Hint: A group without a (name ...) field is named after its tool. Give one of
+  these groups an explicit name.
+  [1]
 
 But not in both a group without inherit and a group that inherits, since the
 former is usable from every context:
@@ -138,6 +167,7 @@ former is usable from every context:
   > (lang dune 3.25)
   > (using unreleased 0.1)
   > (tool_group
+  >  (name lsp-isolated)
   >  (tools ocaml-lsp-server)
   >  (lock_dir))
   > (tool_group
@@ -145,13 +175,13 @@ former is usable from every context:
   >  (inherit (context default)))
   > EOF
   $ dune build
-  File "dune-workspace", line 7, characters 8-24:
-  7 |  (tools ocaml-lsp-server)
+  File "dune-workspace", line 8, characters 8-24:
+  8 |  (tools ocaml-lsp-server)
               ^^^^^^^^^^^^^^^^
   Error: Tool "ocaml-lsp-server" is declared multiple times for context
   "default":
-  - dune-workspace:4
-  - dune-workspace:7
+  - dune-workspace:5
+  - dune-workspace:8
   Hint: A tool declared in a lock_dir group may not be declared again.
   Otherwise a tool may be declared once per inherited context.
   [1]
