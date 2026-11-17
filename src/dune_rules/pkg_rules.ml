@@ -444,7 +444,7 @@ module Pkg = struct
     ; paths : Path.t Paths.t
     ; write_paths : Path.Build.t Paths.t
     ; files_dir : Path.Build.t
-    ; mutable exported_env : string Env_update.t list
+    ; exported_env : string Env_update.t list
     }
 
   module Top_closure = Top_closure.Make (Id.Set) (Monad.Id)
@@ -1571,8 +1571,7 @@ end = struct
         in
         Memo.parallel_map exported_env ~f:(Action_expander.exported_env expander)
       in
-      t.exported_env <- exported_env;
-      Some t
+      Some { t with exported_env }
   ;;
 
   let resolve =
@@ -2049,7 +2048,7 @@ let source_files root ~loc =
     | _ -> false
   in
   let skip_file = String.starts_with ~prefix:".#" in
-  let rec loop acc path =
+  let rec loop path =
     let full_path = Path.Outside_build_dir.append_local root path in
     Fs_memo.dir_contents full_path
     >>= function
@@ -2074,18 +2073,17 @@ let source_files root ~loc =
           | S_DIR -> if skip_dir name_s then Skip else Right relative
           | _ -> if skip_file name_s then Skip else Left relative)
       in
-      let acc = Path.Local.Set.of_list files |> Path.Local.Set.union acc in
       Memo.map_reduce
         dirs
-        ~f:(loop Path.Local.Set.empty)
-        ~empty:(Ok acc)
+        ~f:loop
+        ~empty:(Ok (Path.Local.Set.of_list files))
         ~combine:(fun left right ->
           let open Result.O in
           let* left = left in
           let+ right = right in
           Path.Local.Set.union left right)
   in
-  loop Path.Local.Set.empty Path.Local.root
+  loop Path.Local.root
 ;;
 
 let source_rules (paths : Path.Build.t Paths.t) (info : Pkg_info.t) =
@@ -2611,9 +2609,7 @@ let exported_env context =
     Pp.textf "lock directory environment for context %S" (Context_name.to_string context))
   @@ fun () ->
   let+ all_project_deps = all_project_deps context in
-  let env = Pkg.build_env_of_deps all_project_deps in
-  let vars = Env.Map.map env ~f:Value_list_env.string_of_env_values in
-  Env.extend Env.empty ~vars
+  Pkg.build_env_of_deps all_project_deps |> Value_list_env.to_env
 ;;
 
 let lock_dir_package_env =
@@ -2632,11 +2628,7 @@ let lock_dir_package_env =
        | false -> Memo.return Env.empty
        | true ->
          let+ deps = project_deps ~packages context in
-         let vars =
-           Pkg.build_env_of_deps deps
-           |> Env.Map.map ~f:Value_list_env.string_of_env_values
-         in
-         Env.extend Env.empty ~vars)
+         Pkg.build_env_of_deps deps |> Value_list_env.to_env)
 ;;
 
 let env_for_packages ~(packages : Package.Name.Selection.t) context =
