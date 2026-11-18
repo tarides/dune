@@ -237,7 +237,7 @@ module Paths = struct
           [ Context_name.to_string ctx; ".pkg"; Pkg_digest.to_string pkg_digest ]
       | Dev_tool dev_tool -> Pkg_dev_tool.universe_install_path dev_tool
     in
-    of_root pkg_digest.name ~root
+    of_root pkg_digest.name ~root ~relative:Path.Build.relative
   ;;
 
   let make_install_cookie target_dir ~relative = relative target_dir "cookie"
@@ -541,8 +541,7 @@ module Action_expander = struct
     include Expander0
 
     type t =
-      { name : Dune_pkg.Package_name.t
-      ; paths : Path.t Paths.t
+      { paths : Path.t Paths.t
       ; artifacts : Path.t Filename.Map.t Memo.t
       ; depends :
           (Variable.value Package_variable_name.Map.t * Path.t Paths.t) Package.Name.Map.t
@@ -675,15 +674,7 @@ module Action_expander = struct
     ;;
 
     let expand_pform
-          { name = _
-          ; env = _
-          ; paths
-          ; artifacts = _
-          ; context
-          ; depends
-          ; version = _
-          ; depexts = _
-          }
+          { env = _; paths; artifacts = _; context; depends; version = _; depexts = _ }
           ~source
           (pform : Pform.t)
       : (Value.t list, [ `Undefined_pkg_var of Package_variable_name.t ]) result Memo.t
@@ -959,7 +950,7 @@ module Action_expander = struct
          let ocamlfind_destdir = (Lazy.force expander.paths.install_roots).lib_root in
          Run_with_path.action
            ~depexts
-           ~pkg:(expander.name, prog_loc)
+           ~pkg:(expander.paths.name, prog_loc)
            exe
            args
            ~ocamlfind_destdir)
@@ -1111,7 +1102,6 @@ module Action_expander = struct
       binaries
     in
     { Expander.paths = pkg.paths
-    ; name = pkg.info.name
     ; artifacts
     ; context
     ; depends
@@ -1514,9 +1504,7 @@ end = struct
         |> Path.as_in_build_dir_exn
       in
       let id = Pkg.Id.gen () in
-      let write_paths =
-        Paths.make pkg_digest package_universe ~relative:Path.Build.relative
-      in
+      let write_paths = Paths.make pkg_digest package_universe in
       let install_command = choose_for_current_platform install_command in
       let install_command = Option.map install_command ~f:relocate in
       let build_command = choose_for_current_platform build_command in
@@ -2339,7 +2327,7 @@ let gen_rules ({ DB.pkg_digest_table; _ } as db) ~package_universe pkg_digest =
   let { DB.Pkg_table.pkg = { info; _ }; _ } =
     Pkg_digest.Map.find_exn pkg_digest_table pkg_digest
   in
-  let paths = Paths.make pkg_digest package_universe ~relative:Path.Build.relative in
+  let paths = Paths.make pkg_digest package_universe in
   let* source_deps, copy_rules = source_rules paths info in
   let build =
     let open Action_builder.O in
@@ -2395,9 +2383,7 @@ let setup_pkg_install_alias =
          |> List.map ~f:(fun { DB.Pkg_table.pkg_digest; _ } -> pkg_digest))
     in
     List.map pkg_digests ~f:(fun pkg_digest ->
-      Paths.make ~relative:Path.Build.relative pkg_digest (Dependencies ctx_name)
-      |> Paths.target_dir
-      |> Path.build)
+      Paths.make pkg_digest (Dependencies ctx_name) |> Paths.target_dir |> Path.build)
     |> Action_builder.paths
   in
   fun ~dir ctx_name ->
