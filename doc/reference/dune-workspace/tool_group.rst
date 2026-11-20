@@ -3,9 +3,9 @@ tool_group
 
 .. warning::
 
-   This stanza is unreleased and a work in progress. It is parsed and validated,
-   but tools declared with it are not yet locked, built, or runnable. It may
-   change without notice.
+   This stanza is unreleased and a work in progress. Tools declared with it
+   can be locked with ``dune tools lock <group>`` but are not yet built or
+   runnable. It may change without notice.
 
 Declares developer tools that are managed by Dune's package management but are
 not dependencies of the project, such as ``ocamlformat`` or
@@ -18,7 +18,9 @@ To enable the stanza, add ``(using unreleased 0.1)`` :doc:`extension
 
    .. describe:: (name <string>)
 
-      Optional. Two groups may not share a name.
+      Optional when the group declares a single tool, in which case the group
+      is named after that tool. Required otherwise. Two groups may not share
+      a name.
 
    .. describe:: (tools <dep-specification> ...)
 
@@ -51,6 +53,11 @@ To enable the stanza, add ``(using unreleased 0.1)`` :doc:`extension
          context, along with everything these packages depend on. At least one
          package is required when the field is present. When the field is
          omitted, Dune re-uses the context's packages where possible.
+
+``dune tools lock <name>`` solves a group and writes its lock directory to
+``_build/.tools.locks/<name>``. A group that inherits a context prefers the
+versions locked by that context, and its lock directory only contains the
+packages that differ from the context's.
 
 Example:
 
