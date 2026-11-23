@@ -28,4 +28,9 @@ let which =
 
 let doc = "Command group for wrapped tools."
 let info = Cmd.info ~doc "tools"
-let group = Cmd.group info [ exec; install; which; Tools_common.env_command ]
+
+let group =
+  Cmd.group
+    info
+    [ exec; install; which; Tools_common.env_command; Tool_group_lock.command ]
+;;

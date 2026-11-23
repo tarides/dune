@@ -11,6 +11,8 @@ module Package_version = Dune_pkg.Package_version
 module Source = Dune_pkg.Source
 module Package_name = Dune_lang.Package_name
 
+let provided_packages = Package_name.Set.singleton Dune_pkg.Dune_dep.name
+
 module Update = struct
   open Dyn
 
@@ -107,6 +109,7 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
       (Lock_dir.create_latest_version
          Package_name.Map.empty
          ~local_packages:[]
+         ~provided_packages
          ~ocaml:None
          ~repos:None
          ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
@@ -156,6 +159,7 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
        in
        Lock_dir.create_latest_version
          ~local_packages:[]
+         ~provided_packages
          ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
          ~repos:None
          ~expanded_solver_variable_bindings:
@@ -322,6 +326,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
     in
     Lock_dir.create_latest_version
       ~local_packages:[]
+      ~provided_packages
       ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
       ~repos:(Some [ opam_repo ])
       ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
@@ -470,6 +475,7 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
       in
       Lock_dir.create_latest_version
         ~local_packages:[]
+        ~provided_packages
         ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
         ~repos:(Some [ opam_repo ])
         ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
