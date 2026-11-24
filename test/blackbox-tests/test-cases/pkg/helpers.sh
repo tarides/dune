@@ -48,6 +48,15 @@ build_pkg() {
   fi
 }
 
+package_target_miss_reasons() {
+  dune trace cat | jq -cs --arg package "$1" '
+    [ .[]
+      | select(.cat == "cache" and .name == "workspace_local_miss")
+      | select(.args.target | contains($package + ".") and endswith("/target"))
+      | .args.reason | split(":")[0]
+    ]'
+}
+
 show_pkg() {
   local pkg=$1
   local prefix
@@ -453,6 +462,19 @@ create_mock_repo() {
 	 (name mock)
 	 (url "${repo}"))
 	EOF
+}
+
+write_portable_lockdir_workspace() {
+  {
+    cat <<-EOF
+	(lang dune 3.20)
+	(repository
+	 (name mock)
+	 (url "$(default_repo_path)"))
+	EOF
+    cat
+    echo '(pkg enabled)'
+  } > dune-workspace
 }
 
 create_mock_repo_with_doc_workspace() {
