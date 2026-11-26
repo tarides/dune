@@ -99,25 +99,15 @@ let promote_target_if_not_up_to_date
    we don't care any more, for example, by introducing reverse dependencies in
    Memo (and/or by having smarter cancellations). *)
 let promote ~(targets : _ Targets.Produced.t) ~(promote : Rule.Promote.t) ~promote_source =
-  (* Select targets taking into account the (promote (only <glob>)) field. *)
-  let selected_for_promotion : Path.Local.t -> bool =
-    match promote.only with
-    | None -> fun (_ : Path.Local.t) -> true
-    | Some pred -> fun target -> Predicate.test pred (Path.Local.basename target)
-  in
   let open Fiber.O in
   (* Map target paths taking into account the (promote (into <dir>)) field. *)
-  let* (relocate : Path.Build.t -> Path.Source.t) =
+  let* destination_root =
+    let source_root = Path.Build.drop_build_context_exn targets.root in
     match promote.into with
-    | None -> Fiber.return Path.Build.drop_build_context_exn
+    | None -> Fiber.return source_root
     | Some { loc; dir = into_dir } ->
-      let into_dir =
-        Path.Source.relative
-          (Path.Build.drop_build_context_exn targets.root)
-          into_dir
-          ~error_loc:loc
-      in
-      let promote_into_error ?unix_error msg =
+      let into_dir = Path.Source.relative source_root into_dir ~error_loc:loc in
+      let promote_into_error ~unix_error msg =
         let extra_messages =
           match unix_error with
           | None -> []
@@ -128,23 +118,24 @@ let promote ~(targets : _ Targets.Produced.t) ~(promote : Rule.Promote.t) ~promo
           ~loc
           (msg (Path.Source.to_string into_dir) :: extra_messages)
       in
-      Memo.run (Fs_memo.path_kind (In_source_dir into_dir))
+      Fs_memo.path_kind (In_source_dir into_dir)
+      |> Memo.run
       >>| (function
-       | Ok S_DIR | Error (ENOENT, _, _) ->
-         fun src -> Path.Source.relative_fname into_dir (Path.Build.basename src)
-       | Ok _other_kind -> promote_into_error (Pp.textf "%S is not a directory.")
+       | Ok S_DIR | Error (ENOENT, _, _) -> into_dir
+       | Ok _other_kind ->
+         promote_into_error ~unix_error:None (Pp.textf "%S is not a directory.")
        | Error unix_error ->
-         promote_into_error ~unix_error (Pp.textf "Cannot promote to directory %S."))
+         promote_into_error
+           ~unix_error:(Some unix_error)
+           (Pp.textf "Cannot promote to directory %S."))
   in
-  let directory_target_error ?unix_error ~dst_dir msgs =
-    let msgs =
-      match unix_error with
-      | None -> msgs
-      | Some error -> Unix_error.Detailed.pp_reason error :: msgs
-    in
+  let relocate = Path.Source.append_local destination_root in
+  let directory_target_error ~unix_error ~dst_dir msgs =
     User_error.raise
-      (Pp.textf "Cannot promote files to %S." (Path.to_string dst_dir) :: msgs)
       ~needs_stack_trace:true
+      (Pp.textf "Cannot promote files to %S." (Path.to_string dst_dir)
+       :: Unix_error.Detailed.pp_reason unix_error
+       :: msgs)
   in
   let create_directory_if_needed ~dir =
     let dst_dir = relocate dir in
@@ -171,45 +162,48 @@ let promote ~(targets : _ Targets.Produced.t) ~(promote : Rule.Promote.t) ~promo
   in
   (* Here we know that the promotion directory exists but we may need to create
      additional subdirectories for [targets.dirs]. *)
-  Targets.Produced.iter_dirs targets ~f:(fun dir ->
-    create_directory_if_needed ~dir:(Path.Build.append_local targets.root dir));
-  let promote_until_clean =
-    match promote.lifetime with
-    | Until_clean -> true
-    | Unlimited -> false
-  in
+  Targets.Produced.iter_dirs targets ~f:(fun dir -> create_directory_if_needed ~dir);
   let* () =
-    Fiber.sequential_iter_seq
-      (Targets.Produced.all_files_seq targets)
-      ~f:(fun (src, src_digest) ->
-        match selected_for_promotion src with
-        | false -> Fiber.return ()
-        | true ->
-          let src = Path.Build.append_local targets.root src in
-          let dst = relocate src in
-          promote_target_if_not_up_to_date
-            ~src
-            ~src_digest
-            ~dst
-            ~promote_source
-            ~promote_until_clean)
+    (* Select targets taking into account the (promote (only <glob>)) field. *)
+    let selected_for_promotion : Path.Local.t -> bool =
+      match promote.only with
+      | None -> fun (_ : Path.Local.t) -> true
+      | Some pred -> fun target -> Predicate.test pred (Path.Local.basename target)
+    in
+    let promote_until_clean =
+      match promote.lifetime with
+      | Until_clean -> true
+      | Unlimited -> false
+    in
+    Targets.Produced.all_files_seq targets
+    |> Fiber.sequential_iter_seq ~f:(fun (src, src_digest) ->
+      match selected_for_promotion src with
+      | false -> Fiber.return ()
+      | true ->
+        let dst = relocate src in
+        let src = Path.Build.append_local targets.root src in
+        promote_target_if_not_up_to_date
+          ~src
+          ~src_digest
+          ~dst
+          ~promote_source
+          ~promote_until_clean)
   in
   (* There can be some files or directories left over from earlier builds, so we
      need to remove them from [targets]. *)
   let remove_stale_files_and_subdirectories ~dir =
-    (* CR-someday rleshchinskiy: This can probably be made more efficient by relocating
-       root once. *)
-    let build_dir = Path.Build.append_local targets.root dir in
-    let dst_dir = relocate build_dir in
+    let dst_dir = relocate dir in
     (* We use a tracked version to subscribe to the correct directory listing.
        In this way, if a user manually creates a file inside a directory target,
        this function will rerun and remove it. *)
-    Memo.run (Fs_memo.dir_contents ~force_update:true (In_source_dir dst_dir))
+    Fs_memo.dir_contents ~force_update:true (In_source_dir dst_dir)
+    |> Memo.run
     >>|
     let dst_dir = Path.source dst_dir in
     function
     | Error unix_error -> directory_target_error ~unix_error ~dst_dir []
     | Ok dir_contents ->
+      let build_dir = Path.Build.append_local targets.root dir in
       Fs_memo.Dir_contents.iter dir_contents ~f:(fun file_name kind ->
         match kind with
         | S_REG ->
@@ -227,6 +221,6 @@ let promote ~(targets : _ Targets.Produced.t) ~(promote : Rule.Promote.t) ~promo
         | _kind ->
           Fpath.unlink_no_err (Path.to_string (Path.relative_fname dst_dir file_name)))
   in
-  Fiber.sequential_iter_seq (Targets.Produced.all_dirs_seq targets) ~f:(fun dir ->
-    remove_stale_files_and_subdirectories ~dir)
+  Targets.Produced.all_dirs_seq targets
+  |> Fiber.sequential_iter_seq ~f:(fun dir -> remove_stale_files_and_subdirectories ~dir)
 ;;
