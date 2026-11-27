@@ -46,7 +46,7 @@ type t =
       ; can_run_in_action_runner : bool
       }
   | With_accepted_exit_codes of int Predicate_lang.t * t
-  | Chdir of Path.t * t
+  | Chdir of Path.Build.t * t
   | Setenv of string * string * t
   | Redirect_out of Outputs.t * Path.Build.t * File_perm.t * t
   | Redirect_out_atomic of Path.Build.t * t
@@ -158,8 +158,8 @@ let digest =
       loop d t ~dir
     | Chdir (path, t) ->
       int d 2;
-      digest_path d ~dir path;
-      loop d t ~dir:path
+      digest_target d ~dir path;
+      loop d t ~dir:(Path.build path)
     | Setenv (var, value, t) ->
       int d 3;
       string d var;
@@ -256,51 +256,6 @@ let digest =
   fun d t -> loop d t ~dir:Path.root
 ;;
 
-let fold_one_step t ~init:acc ~f =
-  match t with
-  | Chdir (_, t)
-  | Setenv (_, _, t)
-  | Redirect_out (_, _, _, t)
-  | Redirect_out_atomic (_, t)
-  | Redirect_in (_, _, t)
-  | Ignore (_, t)
-  | If_file_exists (_, t)
-  | With_accepted_exit_codes (_, t) -> f acc t
-  | Progn l | Pipe (_, l) | Concurrent l -> List.fold_left l ~init:acc ~f
-  | Run _
-  | Echo _
-  | Cat _
-  | Copy _
-  | Symlink _
-  | Hardlink _
-  | System _
-  | Bash _
-  | Write_file _
-  | Rename _
-  | Remove_tree _
-  | Mkdir _
-  | Diff _
-  | Extension _ -> acc
-;;
-
-(* TODO change [chdir] to use [Path.Build.t] in the directory. This will be
-   easier once [Action.t] is split off from the dune lang's action *)
-let chdirs =
-  let rec loop acc t =
-    let acc =
-      match t with
-      | Chdir (dir, _) ->
-        (match Path.as_in_build_dir dir with
-         | None ->
-           Code_error.raise "chdir outside the build directory" [ "dir", Path.to_dyn dir ]
-         | Some dir -> Path.Build.Set.add acc dir)
-      | _ -> acc
-    in
-    fold_one_step t ~init:acc ~f:loop
-  in
-  fun t -> loop Path.Build.Set.empty t
-;;
-
 let empty = Progn []
 
 let exists t ~leaf ~extension =
@@ -345,7 +300,7 @@ let sandbox t sandbox =
   let rec loop = function
     | Run ({ prog; _ } as run) -> Run { run with prog = Result.map prog ~f:path }
     | With_accepted_exit_codes (pred, t) -> With_accepted_exit_codes (pred, loop t)
-    | Chdir (dir, t) -> Chdir (path dir, loop t)
+    | Chdir (dir, t) -> Chdir (target dir, loop t)
     | Setenv (var, value, t) -> Setenv (var, value, loop t)
     | Redirect_out (outputs, fn, perm, t) ->
       Redirect_out (outputs, target fn, perm, loop t)

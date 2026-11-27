@@ -61,7 +61,10 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
       { eenv with exit_codes }
     in
     exec t ~ectx ~eenv
-  | Chdir (dir, t) -> exec t ~ectx ~eenv:{ eenv with working_dir = dir }
+  | Chdir (dir, t) ->
+    let dir = Path.build dir in
+    Path.mkdir_p dir;
+    exec t ~ectx ~eenv:{ eenv with working_dir = dir }
   | Setenv (var, value, t) ->
     exec
       t

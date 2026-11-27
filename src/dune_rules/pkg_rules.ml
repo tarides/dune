@@ -1055,7 +1055,8 @@ module Action_expander = struct
   let expand context (pkg : Pkg.t) action =
     let+ action =
       let expander = expander context pkg in
-      expand action ~expander >>| Action.chdir pkg.paths.source_dir
+      let dir = Path.as_in_build_dir_exn pkg.paths.source_dir in
+      expand action ~expander >>| Action.chdir dir
     in
     Action.Full.make action |> Action_builder.return |> Action_builder.with_no_targets
   ;;
@@ -1981,6 +1982,54 @@ let files path =
   Dep.Set.of_source_files ~files ~empty_directories, files
 ;;
 
+module Prepare_source = struct
+  module A = Action_ext.Make (struct
+      type ('path, 'target) t = 'path
+
+      let name = "prepare-package-source"
+      let version = 1
+      let runs_process = false
+      let can_run_in_action_runner = false
+      let is_useful_to_memoize = false
+      let bimap dir f _ = f dir
+      let encode dir path _ = path dir
+
+      let action source_dir ~ectx:_ ~eenv:_ =
+        Path.mkdir_p source_dir;
+        Fiber.Temp.with_temp_dir
+          ~parent_dir:(Path.parent_exn source_dir)
+          ~prefix:".dune"
+          ~suffix:"copy"
+          ~f:(fun tmp ->
+            let tmp = Result.ok_exn tmp in
+            Async.async (fun () ->
+              let tmp = Path.relative tmp "source" in
+              let make_writable = Permissions.add Permissions.write in
+              let copy ~dir file () =
+                let path = Path.relative_fname (Path.relative source_dir dir) file in
+                Io.copy_file ~overwrite:false ~chmod:make_writable ~src:path ~dst:tmp ();
+                Fpath.rename_exn (Path.to_string tmp) (Path.to_string path)
+              in
+              Fpath.traverse
+                ~dir:(Path.to_string source_dir)
+                ~init:()
+                ~on_file:copy
+                ~on_symlink:
+                  (`Call
+                      (fun ~dir file () ->
+                        copy ~dir file ();
+                        (), None))
+                ()))
+      ;;
+    end)
+
+  let action dir =
+    A.action dir
+    |> Action.Full.make ~sandbox:Sandbox_config.needs_sandboxing
+    |> Action_builder.With_targets.return
+  ;;
+end
+
 let dune_dep =
   lazy (Sys.executable_name |> Path.External.of_string |> Path.external_ |> Dep.file)
 ;;
@@ -2006,7 +2055,10 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
                     Path.Build.append_local pkg.write_paths.source_dir local_path
                   in
                   Action.progn
-                    [ Action.mkdir (Path.Build.parent_exn dst); Action.copy src dst ])
+                    [ Action.mkdir (Path.Build.parent_exn dst)
+                    ; Action.remove_tree dst
+                    ; Action.copy src dst
+                    ])
                 |> Action.concurrent
                 |> Action.Full.make
                 |> Action_builder.return)
@@ -2077,7 +2129,13 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
       |> Action_builder.return
       |> Action_builder.with_no_targets
     in
-    [ copy_action
+    let prepare_source =
+      match pkg.build_command, pkg.install_command with
+      | Some (Action _), _ | _, Some _ -> [ Prepare_source.action pkg.paths.source_dir ]
+      | (None | Some Dune), None -> []
+    in
+    [ prepare_source
+    ; copy_action
     ; [ progress_building ]
     ; build_action
     ; install_action
@@ -2102,7 +2160,7 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
   (* TODO should we add env deps on these? *)
   >>> add_env (Pkg.exported_env pkg) build_action
   |> Action_builder.With_targets.map ~f:(fun action ->
-    Action.Full.add_sandbox (Sandbox_mode.Set.singleton Sandbox_mode.copy) action
+    Action.Full.add_sandbox Sandbox_config.needs_sandboxing action
     |> Action.Full.disable_sandbox_policy)
 ;;
 

@@ -73,4 +73,7 @@ The destination is at a different directory depth than the dependency file.
   >   dune_cmd subst 'readlink\([^)]*\)' 'readlink(...)' < install.log | censor
   >   false
   > fi
-  payload
+  Error:
+  readlink(...): No such file or directory
+  -> required by _build/_private/default/.pkg/consumer/target
+  [1]

@@ -371,25 +371,34 @@ module Per_module = struct
   ;;
 end
 
-let preprocess_fields_with_prefix ~prefix:field_prefix =
+let preprocess_fields ~(for_ : Compilation_mode.t) =
   let open Decoder in
   let prefix =
-    let prefix x = x ^ "." in
-    Option.map field_prefix ~f:prefix |> Option.value ~default:""
+    match for_ with
+    | Ocaml -> ""
+    | Melange -> "melange."
+  in
+  let optional_field name decode =
+    let decode =
+      match for_ with
+      | Ocaml -> decode
+      | Melange -> Syntax.since Stanza.syntax (3, 24) >>> decode
+    in
+    field_o (prefix ^ name) decode
   in
   let+ preprocess =
-    match field_prefix with
-    | None ->
+    match for_ with
+    | Melange -> optional_field "preprocess" Per_module.decode
+    | Ocaml ->
       let+ v = field "preprocess" Per_module.decode ~default:(Per_module.default ()) in
       Some v
-    | Some _ -> field_o (prefix ^ "preprocess") Per_module.decode
   and+ preprocessor_deps =
     let decode =
       let+ loc = loc
       and+ l = repeat Dep_conf.decode in
       loc, l
     in
-    field_o (prefix ^ "preprocessor_deps") decode
+    optional_field "preprocessor_deps" decode
   and+ syntax = Syntax.get_exn Stanza.syntax in
   let preprocessor_deps =
     match preprocessor_deps, preprocess with
@@ -414,12 +423,6 @@ let preprocess_fields_with_prefix ~prefix:field_prefix =
       deps
   in
   preprocess, preprocessor_deps
-;;
-
-let preprocess_fields =
-  let open Decoder in
-  let+ preprocess, deps = preprocess_fields_with_prefix ~prefix:None in
-  Option.value_exn preprocess, deps
 ;;
 
 type preprocess =
